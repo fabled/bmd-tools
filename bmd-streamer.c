@@ -248,6 +248,7 @@ struct blackmagic_device {
 	int status;
 	int fxstatus;
 	int recognized;
+	int encode_sent;
 	struct display_mode *current_mode;
 
 	struct libusb_device_descriptor desc;
@@ -321,7 +322,7 @@ static void bmd_fujitsu_write(struct blackmagic_device *bmd, uint32_t reg, uint1
 	msg[3] = value >> 8;
 	msg[4] = value;
 
-#if 1
+#if 0
 	{
 		uint16_t oldvalue = bmd_fujitsu_read(bmd, reg);
 		if (value != oldvalue)
@@ -596,12 +597,15 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	uint8_t status;
 	int r;
 
+	bmd->encode_sent = 1;
+
+	fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
 	bmd_configure_encoder(bmd, &ep);
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR,
 		VR_FUJITSU_START_ENCODING, 0x0004, 0,
-		&status, sizeof(status), 1000);
+		&status, sizeof(status), 2000);
 	if (r < 0) {
 		err = "start encoding";
 		goto error;
@@ -652,9 +656,10 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		bmd->fxstatus = msg[5];
 
 		if (bmd->fxstatus == FX2Status_Idle) {
+			bmd->encode_sent = 0;
 			if (!bmd->recognized)
 				bmd_recognize_device(bmd);
-			if (bmd->current_mode && bmd->running)
+			if (bmd->running && bmd->current_mode && !bmd->encode_sent)
 				bmd_encoder_start(bmd);
 		}
 		break;
@@ -667,7 +672,7 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		else
 			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
 
-		if (bmd->fxstatus == FX2Status_Idle && bmd->current_mode)
+		if (bmd->running && bmd->fxstatus == FX2Status_Idle && bmd->current_mode && !bmd->encode_sent)
 			bmd_encoder_start(bmd);
 		break;
 	case 0x0d:
