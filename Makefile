@@ -1,4 +1,4 @@
-LIBUSB_FLAGS += $(shell pkgconf --cflags --libs libusb-1.0)
+LIBUSB_FLAGS += $(shell pkg-config --cflags --libs libusb-1.0)
 CFLAGS = -g -O3 #-Wall
 
 all: bmd-streamer bmd-extractfw
