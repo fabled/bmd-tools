@@ -15,3 +15,5 @@ BMDStreamingServer.exe (part of the Windows drivers).
 and to stream out (currently to stdout) the MPEG TS stream
 from the device.
 
+Dependencies:
+ * libusb (1.0.16 or newer) or libusbx
