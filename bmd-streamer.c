@@ -77,7 +77,7 @@ struct display_mode {
 };
 
 struct encoding_parameters {
-	uint16_t	video_kbps, audio_kbps, audio_khz;
+	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
 	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac;
 };
 
@@ -415,7 +415,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	total_bandwidth  = 85226;
 	total_bandwidth += (ep->audio_kbps * 1000.0 * 1024 / (8 * ep->audio_khz) + 14) / 148 * 1504.0 * ep->audio_khz / 1024;
 	total_bandwidth += 48128.0 * fps / ((fps == 25 || fps == 50) ? 12 : 15);
-	total_bandwidth += 1.021739130434783 * (ceil(1464*fps) + ceil(152*fps) + (ep->video_kbps * 1.9 + 1000) * 1000);
+	total_bandwidth += 1.021739130434783 * (ceil(1464*fps) + ceil(152*fps) + (ep->video_max_kbps + 1000) * 1000);
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,  
@@ -471,7 +471,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 
 	/* Group 3 - H264 encoder, video source tuning */
 	bmd_fujitsu_write(bmd, 0x001404, current_mode->r1404);
-	bmd_fujitsu_write(bmd, 0x001406, ep->video_kbps * 1.9 + 1000);
+	bmd_fujitsu_write(bmd, 0x001406, ep->video_max_kbps + 1000);
 	bmd_fujitsu_write(bmd, 0x001408, ep->video_kbps);
 	// r140a_l == 1=1080i 4=NTSC, 5=PAL, 0xff=720p
 	bmd_fujitsu_write(bmd, 0x00140a, 0x1700 | current_mode->r140a_l);
@@ -479,7 +479,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	bmd_fujitsu_write(bmd, 0x00140e, 0xd400 | ((current_mode->fps_denominator == 1) ? 0x0001 : 0x0000));
 	bmd_fujitsu_write(bmd, 0x001418, 0x0001);
 	bmd_fujitsu_write(bmd, 0x001420, 0x0000);
-	bmd_fujitsu_write(bmd, 0x001422, ep->video_kbps * 1.9);
+	bmd_fujitsu_write(bmd, 0x001422, ep->video_max_kbps);
 	/* Register 0x1430 lower byte is related to INPUT MODE/TARGET MODE specific.
 	 *  affects directly the output stream resolution, possibly TS mode bits. */
 	bmd_fujitsu_write(bmd, 0x001430, 0xff | (ep->h264_bframes ? 0x0000 : 0x0100));
@@ -586,7 +586,8 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 static void bmd_encoder_start(struct blackmagic_device *bmd)
 {
 	static struct encoding_parameters ep = {
-		.video_kbps = 4000,
+		.video_kbps = 3000,
+		.video_max_kbps = 3500,
 		.h264_profile = FX2_H264_HIGH,
 		.h264_level = 40,
 		.h264_cabac = 1,
