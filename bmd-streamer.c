@@ -383,7 +383,10 @@ static int bmd_recognize_device(struct blackmagic_device *bmd)
 {
 	int i;
 
-	/* 0x88..0x8d	mac address
+	/* 0x84..0x87	firmware version, timestamp or checksum
+	 *	4.1.2 -> 71 70 86 c6
+	 *	4.2.1 -> 7a 01 f1 34
+	 * 0x88..0x8d	mac address
 	 * 0xa0..0xa3	ipv4 address
 	 * 0xa4..0xa7	ipv4 netmask
 	 * 0xa8..0xab	ipv4 gateway
