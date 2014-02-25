@@ -100,6 +100,24 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x0032 },
 	},
+	[DMODE_1920x1080i_29_97] = &(struct display_mode){
+		.description = "1080i 29.97",
+		.width = 1920, .height = 1080, .interlaced = 1,
+		.fps_numerator = 30000, .fps_denominator = 1001, .fx2_fps = 0x4,
+		.ain_offset = 0x0000,
+		.r1000 = 0x0200, .r1404 = 0x0071, .r140a_l = 0x00,
+		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+		.r154x = { 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0000, 0x0400, 0x0000 },
+	},
+	[DMODE_1280x720p_59_94] = &(struct display_mode){
+		.description = "720p 59.94",
+		.width = 1280, .height = 720, .interlaced = 0,
+		.fps_numerator = 60000, .fps_denominator = 1001, .fx2_fps = 0x7,
+		.ain_offset = 0x0384,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a_l = 0xff,
+		.r147x = { 0x10, 0x70, 0x70, 0x10 },
+		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x003c },
+	},
 };
 
 enum {
@@ -497,7 +515,9 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	/* 0x001540 depends on if PAL/NTSC or interlaced mode is set */
 	bmd_fujitsu_write(bmd, 0x001540, 0x0000);
 
-	/* INPUT MODE based constants likely tuning for sync or similar  */
+	/* INPUT MODE based constants likely tuning for sync or similar,
+	 * some of these seem to get ignored (and initialized to random
+	 * value by the BMD drivers). */
 	bmd_fujitsu_write(bmd, 0x001542, current_mode->r154x[0]);
 	bmd_fujitsu_write(bmd, 0x001544, current_mode->r154x[1]);
 	bmd_fujitsu_write(bmd, 0x001546, current_mode->r154x[2]);
