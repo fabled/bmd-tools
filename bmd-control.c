@@ -48,6 +48,8 @@ struct atem_connection {
 	uint16_t	packet_id;
 };
 
+static int verbose = 0;
+
 static void send_hello(struct atem_connection *c)
 {
 	struct {
@@ -96,7 +98,7 @@ static void handle_atem_messages(struct atem_connection *c)
 	if (len < (ssize_t) sizeof(u.h))
 		return;
 
-	fprintf(stderr, "ATEM: Received %d bytes\n", len);
+	if (verbose) fprintf(stderr, "ATEM: Received %d bytes\n", len);
 	c->uid = u.h.uid;
 	if (u.h.length & htons(ATEM_CMD_HELLO | ATEM_CMD_ACKREQ))
 		send_ack(c, &u.h);
@@ -105,8 +107,9 @@ static void handle_atem_messages(struct atem_connection *c)
 	if (len < (ssize_t) sizeof(u.h)+sizeof(u.first))
 		return;
 	for (sub = &u.first; sub; sub = next_subhdr(&u.h, sub)) {
-		fprintf(stderr, "  -> type: %4.4s, length: %d\n",
-			&sub->type, ntohs(sub->length));
+		if (verbose)
+			fprintf(stderr, "  -> type: %4.4s, length: %d\n",
+				&sub->type, ntohs(sub->length));
 	}
 }
 
@@ -125,7 +128,7 @@ static void handle_client_messages(int cfd, struct atem_connection *c)
 	if (len < (ssize_t) sizeof(u.h))
 		return;
 
-	fprintf(stderr, "CLNT: Forwarding %d bytes to ATEM\n", len);
+	if (verbose) fprintf(stderr, "CLNT: Forwarding %d bytes to ATEM\n", len);
 	u.h = (struct atem_cmd_header) {
 		.length = htons(ATEM_CMD_ACKREQ | len),
 		.uid = c->uid,
@@ -212,8 +215,9 @@ static int usage(void)
 int main(int argc, char **argv)
 {
 	static const struct option long_options[] = {
-		{ "connect", no_argument, NULL, 'c' },
+		{ "connect", required_argument, NULL, 'c' },
 		{ "daemon", no_argument, NULL, 'd' },
+		{ "verbose", no_argument, NULL, 'v' },
 		{ NULL }
 	};
 	static const char short_options[] = "c:d";
@@ -233,6 +237,9 @@ int main(int argc, char **argv)
 			break;
 		case 'd':
 			daemon = 1;
+			break;
+		case 'v':
+			verbose++;
 			break;
 		default:
 			return usage();
