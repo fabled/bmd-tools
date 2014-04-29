@@ -9,14 +9,13 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 
-#define _FOURCC(s) (s[0]+(s[1]<<8)+(s[2]<<16)+(s[3]<<24))
-#define FOURCC(s) _FOURCC(#s)
 #define __STRINGIFY(s) #s
 #define STRINGIFY(s) __STRINGIFY(s)
 #define count_of(x) (sizeof(x) / sizeof((x) [0]))
@@ -81,46 +80,6 @@ static struct atem_subcmd_header *next_subhdr(struct atem_cmd_header *hdr, struc
 	return nxt;
 }
 
-static void send_auto(struct atem_connection *c)
-{
-	struct {
-		struct atem_cmd_header h;
-		struct {
-			struct atem_subcmd_header s;
-			uint32_t unused;
-		} sub;
-	} msg = {
-		.h.length = htons(ATEM_CMD_ACKREQ | sizeof(msg)),
-		.h.uid = c->uid,
-		.h.packet_id = htons(++c->packet_id),
-		.sub.s.length = htons(sizeof(msg.sub)),
-		.sub.s.type = FOURCC(DAut),
-	};
-	send(c->fd, &msg, sizeof(msg), 0);
-	fprintf(stderr, "Do Auto\n");
-}
-
-static void send_set_preview(struct atem_connection *c, uint16_t index)
-{
-	struct {
-		struct atem_cmd_header h;
-		struct {
-			struct atem_subcmd_header s;
-			uint16_t unknown;
-			uint16_t index;
-		} preview;
-	} msg = {
-		.h.length = htons(ATEM_CMD_ACKREQ | sizeof(msg)),
-		.h.uid = c->uid,
-		.h.packet_id = htons(++c->packet_id),
-		.preview.s.length = htons(sizeof(msg.preview)),
-		.preview.s.type = FOURCC(CPvI),
-		.preview.index = htons(index),
-	};
-	send(c->fd, &msg, sizeof(msg), 0);
-	fprintf(stderr, "Selecting Preview %d\n", index);
-}
-
 static void handle_atem_messages(struct atem_connection *c)
 {
 	union {
@@ -175,9 +134,79 @@ static void handle_client_messages(int cfd, struct atem_connection *c)
 	send(c->fd, u.buf, len, 0);
 }
 
+#define B_U16(x) (((x) >> 8) & 0xff), ((x) & 0xff)
+#define B_U32(x) B_U16((x) >> 16), B_U16(x)
+#define ATEMCMD(str, data...) \
+{ str, (uint8_t []) { B_U16(4+sizeof((uint8_t[]){data})), B_U16(0), data } }
+
+static const struct atem_command {
+	char *name;
+	uint8_t *data;
+} atem_commands[] = {
+	ATEMCMD("auto",			'D','A','u','t', B_U32(0)),
+	ATEMCMD("preview:1",		'C','P','v','I', B_U16(0), B_U16(1)),
+	ATEMCMD("preview:2",		'C','P','v','I', B_U16(0), B_U16(2)),
+	ATEMCMD("preview:3",		'C','P','v','I', B_U16(0), B_U16(3)),
+	ATEMCMD("preview:4",		'C','P','v','I', B_U16(0), B_U16(4)),
+	ATEMCMD("preview:5",		'C','P','v','I', B_U16(0), B_U16(5)),
+	ATEMCMD("preview:6",		'C','P','v','I', B_U16(0), B_U16(6)),
+	ATEMCMD("preview:bars",		'C','P','v','I', B_U16(0), B_U16(1000)),
+	ATEMCMD("preview:color1",	'C','P','v','I', B_U16(0), B_U16(2001)),
+	ATEMCMD("preview:color2",	'C','P','v','I', B_U16(0), B_U16(2002)),
+	ATEMCMD("preview:media1",	'C','P','v','I', B_U16(0), B_U16(3010)),
+	ATEMCMD("preview:media2",	'C','P','v','I', B_U16(0), B_U16(3020)),
+};
+
+static int cmpcmd(const void *m1, const void *m2)
+{
+	const struct atem_command *c1 = m1, *c2 = m2;
+	return strcmp(c1->name, c2->name);
+}
+
+static int send_commands(struct atem_connection *c, int argc, char **argv)
+{
+	union {
+		char buf[1500];
+		struct atem_cmd_header h;
+	} u;
+	struct atem_subcmd_header *sh;
+	int i, sub_len, pos = sizeof(struct atem_cmd_header);
+
+	if (argc < 2) return -1;
+
+	for (i = 1; i < argc; i++) {
+		struct atem_command key, *res;
+		key.name = argv[i];
+		res = bsearch(&key, atem_commands, count_of(atem_commands),
+			      sizeof(struct atem_command), cmpcmd);
+		if (!res) {
+			fprintf(stderr, "Unrecognized command: %s\n", argv[i]);
+			return -1;
+		}
+		sh = (struct atem_subcmd_header *) res->data;
+		sub_len = htons(sh->length);
+		if (pos + sub_len >= sizeof(u.buf)) {
+			fprintf(stderr, "Too many commands\n");
+			return -1;
+		}
+		memcpy(&u.buf[pos], sh, sub_len);
+		pos += sub_len;
+	}
+
+	u.h = (struct atem_cmd_header) {
+		.length = htons(ATEM_CMD_ACKREQ | pos),
+		.uid = c->uid,
+		.packet_id = htons(++c->packet_id),
+	};
+	send(c->fd, u.buf, pos, 0);
+
+	return 0;
+}
+
 static int usage(void)
 {
 	fprintf(stderr, "usage: bmd-control [-d|--daemon] [-c|--connect HOST] [CMD]\n");
+	return 1;
 }
 
 int main(int argc, char **argv)
@@ -254,6 +283,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 
+	ret = 0;
 	if (daemon) {
 		fds[0].fd = c.fd;
 		fds[0].events = POLLIN;
@@ -268,15 +298,9 @@ int main(int argc, char **argv)
 			if (fds[1].revents & POLLIN)
 				handle_client_messages(lfd, &c);
 		}
-	} else if (argc == 1) {
-		rc = atoi(argv[1]);
-		if (rc == 0)
-			send_auto(&c);
-		else
-			send_set_preview(&c, rc);
-		ret = 0;
 	} else {
-		ret = usage();
+		if (send_commands(&c, argc, argv) < 0)
+			ret = usage();
 	}
 
 	close(c.fd);
