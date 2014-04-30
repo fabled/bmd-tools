@@ -11,7 +11,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <getopt.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -49,6 +51,17 @@ struct atem_connection {
 };
 
 static int verbose = 0;
+static struct timeval time_now, time_reconnect, five_seconds = {5,0};
+
+static int timerdiff(const struct timeval *a, const struct timeval *b)
+{
+	long long ms;
+	ms  = (long long)a->tv_sec * 1000 + (long long)a->tv_usec / 1000;
+	ms -= (long long)b->tv_sec * 1000 + (long long)b->tv_usec / 1000;
+	if (ms < INT_MIN) ms = INT_MIN;
+	if (ms > INT_MAX) ms = INT_MAX;
+	return ms;
+}
 
 static void send_hello(struct atem_connection *c)
 {
@@ -60,7 +73,10 @@ static void send_hello(struct atem_connection *c)
 		.h.uid = htons(0x1337),
 		.hello = { 0x01 },
 	};
+	c->uid = 0;
+	c->packet_id = 0;
 	send(c->fd, &msg, sizeof(msg), 0);
+	timeradd(&time_now, &five_seconds, &time_reconnect);
 }
 
 static void send_ack(struct atem_connection *c, struct atem_cmd_header *hdr)
@@ -97,6 +113,8 @@ static void handle_atem_messages(struct atem_connection *c)
 	len = recv(c->fd, u.buf, sizeof(u.buf), 0);
 	if (len < (ssize_t) sizeof(u.h))
 		return;
+
+	timeradd(&time_now, &five_seconds, &time_reconnect);
 
 	if (verbose) fprintf(stderr, "ATEM: Received %d bytes\n", len);
 	c->uid = u.h.uid;
@@ -227,7 +245,7 @@ int main(int argc, char **argv)
 	struct pollfd fds[2];
 	struct addrinfo *result, *rp;
 	const char *connect_host = NULL;
-	int daemon = 0, ret = 10, rc, lfd, opt, optindex;
+	int daemon = 0, ret = 10, ms, rc, lfd, opt, optindex;
 
 	optindex = 0;
 	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
@@ -297,9 +315,14 @@ int main(int argc, char **argv)
 		fds[1].fd = lfd;
 		fds[1].events = POLLIN;
 
-		send_hello(&c);
 		while (1) {
-			poll(fds, count_of(fds), -1);
+			gettimeofday(&time_now, NULL);
+			ms = timerdiff(&time_reconnect, &time_now);
+			if (ms <= 0) {
+				send_hello(&c);
+				ms = timerdiff(&time_reconnect, &time_now);
+			}
+			poll(fds, count_of(fds), ms);
 			if (fds[0].revents & POLLIN)
 				handle_atem_messages(&c);
 			if (fds[1].revents & POLLIN)
