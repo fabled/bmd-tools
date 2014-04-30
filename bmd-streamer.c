@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <signal.h>
 #include <string.h>
 #include <pthread.h>
@@ -36,8 +37,24 @@
 
 #define array_size(x) (sizeof(x) / sizeof(x[0]))
 
+struct encoding_parameters {
+	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
+	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac;
+};
+
+static int firmware_fd = AT_FDCWD;
+static int verbose = 0;
 static int running = 1;
 static volatile int num_workers = 0;
+static struct encoding_parameters ep = {
+	.video_kbps = 3000,
+	.video_max_kbps = 3500,
+	.h264_profile = FX2_H264_HIGH,
+	.h264_level = 40,
+	.h264_cabac = 1,
+	.audio_kbps = 256,
+	.audio_khz = 48000,
+};
 
 enum DISPLAY_MODE {
 	DMODE_720x480i_29_97 = 0,
@@ -74,11 +91,6 @@ struct display_mode {
 	uint16_t	r1000, r140a_l, r1404;
 	uint16_t	r147x[4];
 	uint16_t	r154x[10];
-};
-
-struct encoding_parameters {
-	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
-	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac;
 };
 
 static struct display_mode *display_modes[DMODE_MAX] = {
@@ -200,7 +212,7 @@ static struct firmware *load_firmware(const char *filename, uint16_t device_id)
 	struct stat st;
 	int r, fd;
 
-	r = stat(filename, &st);
+	r = fstatat(firmware_fd, filename, &st, 0);
 	if (r != 0) {
 		fprintf(stderr, "%s: failed to load firmware to memory\n", filename);
 		return NULL;
@@ -213,7 +225,7 @@ static struct firmware *load_firmware(const char *filename, uint16_t device_id)
 	fw->size = st.st_size;
 	fw->device_id = device_id;
 
-	fd = open(filename, O_RDONLY);
+	fd = openat(firmware_fd, filename, O_RDONLY);
 	if (fd < 0)
 		goto error;
 	if (read(fd, fw->data, fw->size) != fw->size)
@@ -392,7 +404,7 @@ static void *bmd_pump_mpegts(void *ctx)
 		mpegparser_parse(&bmd->mpegparser, actual_length);
 	} while (running && bmd->running);
 
-	fprintf(stderr, "%s: mpeg-ts pump exiting: %s\n", bmd->name, libusb_error_name(r));
+	if (verbose) fprintf(stderr, "%s: mpeg-ts pump exiting: %s\n", bmd->name, libusb_error_name(r));
 
 	return NULL;
 }
@@ -608,22 +620,13 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 
 static void bmd_encoder_start(struct blackmagic_device *bmd)
 {
-	static struct encoding_parameters ep = {
-		.video_kbps = 3000,
-		.video_max_kbps = 3500,
-		.h264_profile = FX2_H264_HIGH,
-		.h264_level = 40,
-		.h264_cabac = 1,
-		.audio_kbps = 256,
-		.audio_khz = 48000,
-	};
 	const char *err;
 	uint8_t status;
 	int r;
 
 	bmd->encode_sent = 1;
 
-	fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
+	if (verbose) fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
 	bmd_configure_encoder(bmd, &ep);
 
 	r = libusb_control_transfer(
@@ -676,7 +679,7 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 
 	switch (msg[0]) {
 	case 0x01: /* Status update */
-		fprintf(stderr, "%s: FX2Status: %s (%d)\n", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
+		if (verbose) fprintf(stderr, "%s: FX2Status: %s (%d)\n", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
 		bmd->fxstatus = msg[5];
 
 		if (bmd->fxstatus == FX2Status_Idle) {
@@ -720,10 +723,12 @@ static void bmd_handle_messages(struct blackmagic_device *bmd)
 			break;
 
 		/* The first 16-bits is the length of the full message */
-		fprintf(stderr, "EP8: %4d bytes:", actual_length);
-		for (i = 0; i < actual_length; i++)
-			fprintf(stderr, " %02x", bmd->message_buffer[i]);
-		fprintf(stderr, "\n");
+		if (verbose) {
+			fprintf(stderr, "EP8: %4d bytes:", actual_length);
+			for (i = 0; i < actual_length; i++)
+				fprintf(stderr, " %02x", bmd->message_buffer[i]);
+			fprintf(stderr, "\n");
+		}
 
 		for (i = 2; bmd->message_buffer[i] != 0 && i < actual_length;
 		     i += bmd->message_buffer[i] + 1)
@@ -731,7 +736,7 @@ static void bmd_handle_messages(struct blackmagic_device *bmd)
 	} while (running && bmd->running);
 
 	if (r != LIBUSB_SUCCESS) {
-		fprintf(stderr, "%s: message reader exiting: %s\n", bmd->name, libusb_error_name(r));
+		if (verbose) fprintf(stderr, "%s: message reader exiting: %s\n", bmd->name, libusb_error_name(r));
 		bmd->status = r;
 	}
 }
@@ -849,15 +854,84 @@ static int handle_hotplug(libusb_context *ctx, libusb_device *dev, libusb_hotplu
 	return 0;
 }
 
-int main(void)
+static int usage(void)
 {
+	fprintf(stderr,
+		"usage: bmd-streamer [OPTIONS]\n"
+		"\n"
+		"	-v,--verbose		Print more information\n"
+		"	-k,--video-kbps		Set average video bitrate\n"
+		"	-K,--video-max-kbps	Set maximum video bitrate\n"
+		"	-a,--audio-kbps		Set audio bitrate\n"
+		"	-P,--h264-profile	Set H.264 profile (high,main,baseline)\n"
+		"	-L,--h264-level		Set H.264 level (40 = level 4.0, etc..)\n"
+		"	-b,--h264-bframes	Allow using H.264 B-frames\n"
+		"	-B,--h264-no-bframes	Disable using H.264 B-frames\n"
+		"	-c,--h264-cabac		Allow using H.264 CABAC\n"
+		"	-C,--h264-no-cabac	Disable using H.264 CABAC\n"
+		"\n");
+	return 1;
+}
+
+static int profile_string_to_int(const char *str)
+{
+	if (!strcmp(str, "high")) return FX2_H264_HIGH;
+	if (!strcmp(str, "main")) return FX2_H264_MAIN;
+	if (!strcmp(str, "baseline")) return FX2_H264_BASELINE;
+	return -1;
+}
+
+int main(int argc, char **argv)
+{
+	static const struct option long_options[] = {
+		{ "verbose",		no_argument, NULL, 'v' },
+		{ "video-kbps",		required_argument, NULL, 'k' },
+		{ "video-max-kbps",	required_argument, NULL, 'K' },
+		{ "audio-kbps",		required_argument, NULL, 'a' },
+		{ "h264-profile",	required_argument, NULL, 'P' },
+		{ "h264-level",		required_argument, NULL, 'L' },
+		{ "h264-bframes",	no_argument, NULL, 'b' },
+		{ "h264-no-bframes",	no_argument, NULL, 'B' },
+		{ "h264-cabac",		no_argument, NULL, 'c' },
+		{ "h264-no-cabac",	no_argument, NULL, 'C' },
+		{ NULL }
+	};
+	static const char short_options[] = "vk:K:a:P:L:bcBC";
+
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
 	const char *msg = NULL;
-	int i, r, ec = 0;
+	int i, r, ec = 0, opt, optindex;
 
 	signal(SIGTERM, dostop);
 	signal(SIGINT, dostop);
+
+	optindex = 0;
+	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
+		switch (opt) {
+		case 'f':
+			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY)) < 0) {
+				perror("open");
+				return usage();
+			}
+			break;
+		case 'v': verbose++; break;
+		case 'k': ep.video_kbps = atoi(optarg); break;
+		case 'K': ep.video_max_kbps = atoi(optarg); break;
+		case 'a': ep.audio_kbps = atoi(optarg); break;
+		case 'P':
+			if ((ep.h264_profile = profile_string_to_int(optarg)) < 0)
+				return usage();
+			break;
+		case 'L': ep.h264_level = atoi(optarg); break;
+		case 'b': ep.h264_bframes = 1; break;
+		case 'B': ep.h264_bframes = 0; break;
+		case 'c': ep.h264_cabac = 1; break;
+		case 'C': ep.h264_cabac = 0; break;
+		default:
+			return usage();
+		}
+	}
 
 	firmwares[0] = load_firmware("bmd-atemtvstudio.bin", USB_PID_BMD_ATEM_TV_STUDIO);
 	firmwares[1] = load_firmware("bmd-h264prorecorder.bin", USB_PID_BMD_H264_PRO_RECORDER);

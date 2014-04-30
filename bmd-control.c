@@ -226,7 +226,13 @@ static int send_commands(struct atem_connection *c, int argc, char **argv)
 
 static int usage(void)
 {
-	fprintf(stderr, "usage: bmd-control [-d|--daemon] [-c|--connect HOST] [CMD]\n");
+	fprintf(stderr,
+		"usage: bmd-control [OPTIONS] [COMMANDS]\n"
+		"\n"
+		"	-v,--verbose		Print more information\n"
+		"	-c,--connect		Specify IP-address to connect\n"
+		"	-d,--daemon		Connect to ATEM and proxy requests from non-daemon mode\n"
+		"\n");
 	return 1;
 }
 
@@ -238,7 +244,7 @@ int main(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ NULL }
 	};
-	static const char short_options[] = "c:d";
+	static const char short_options[] = "c:dv";
 
 	struct sockaddr_in sa;
 	struct atem_connection c;
