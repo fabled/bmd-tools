@@ -7,6 +7,7 @@ equipment with built-in H.264 encoder.
 Currently tested device:
 
  * ATEM TV studio
+ * H.264 Pro Recorder (limited supported)
 
 Use *bmd-extractfw* to extract the firmware out from
 BMDStreamingServer.exe (part of the Windows drivers).

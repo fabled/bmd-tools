@@ -50,8 +50,9 @@ static struct encoding_parameters ep = {
 	.video_kbps = 3000,
 	.video_max_kbps = 3500,
 	.h264_profile = FX2_H264_HIGH,
-	.h264_level = 40,
+	.h264_level = 42,
 	.h264_cabac = 1,
+	.h264_bframes = 1,
 	.audio_kbps = 256,
 	.audio_khz = 48000,
 };
@@ -84,11 +85,12 @@ struct display_mode {
 	int		width, height;
 	int		fps_numerator, fps_denominator;
 
-	uint8_t		interlaced;
+	uint8_t		interlaced : 1;
+	uint8_t		convert_to_1088 : 1;
 	uint8_t		fx2_fps;
 
 	uint16_t	ain_offset;
-	uint16_t	r1000, r140a_l, r1404;
+	uint16_t	r1000, r1404, r140a, r1430_l;
 	uint16_t	r147x[4];
 	uint16_t	r154x[10];
 };
@@ -96,10 +98,10 @@ struct display_mode {
 static struct display_mode *display_modes[DMODE_MAX] = {
 	[DMODE_1920x1080i_25] = &(struct display_mode){
 		.description = "1080i 50",
-		.width = 1920, .height = 1080, .interlaced = 1,
+		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.ain_offset = 0x0000,
-		.r1000 = 0x0200, .r1404 = 0x0041, .r140a_l = 0x01,
+		.r1000 = 0x0200, .r1404 = 0x0041, .r140a = 0x1701, .r1430_l = 0xff,
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0034, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0780, 0x0438, 0x0000 },
 	},
@@ -108,16 +110,16 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.width = 1280, .height = 720, .interlaced = 0,
 		.fps_numerator = 50, .fps_denominator = 1, .fx2_fps = 0x6,
 		.ain_offset = 0x0384,
-		.r1000 = 0x0500, .r1404 = 0x0071, .r140a_l = 0xff,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x0032 },
 	},
 	[DMODE_1920x1080i_29_97] = &(struct display_mode){
 		.description = "1080i 29.97",
-		.width = 1920, .height = 1080, .interlaced = 1,
+		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
 		.fps_numerator = 30000, .fps_denominator = 1001, .fx2_fps = 0x4,
 		.ain_offset = 0x0000,
-		.r1000 = 0x0200, .r1404 = 0x0071, .r140a_l = 0x00,
+		.r1000 = 0x0200, .r1404 = 0x0071, .r140a = 0x1700, .r1430_l = 0xff,
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0000, 0x0400, 0x0000 },
 	},
@@ -126,9 +128,18 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.width = 1280, .height = 720, .interlaced = 0,
 		.fps_numerator = 60000, .fps_denominator = 1001, .fx2_fps = 0x7,
 		.ain_offset = 0x0384,
-		.r1000 = 0x0500, .r1404 = 0x0071, .r140a_l = 0xff,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x003c },
+	},
+	[DMODE_1920x1080p_60] = &(struct display_mode){
+		.description = "1080p 60",
+		.width = 1920, .height = 1080, .interlaced = 0,
+		.fps_numerator = 60, .fps_denominator = 1, .fx2_fps = 8,
+		.ain_offset = 0x079e,
+		.r1000 = 0x0200, .r1404 = 0x0071, .r140a = 0x151e, .r1430_l = 0x02,
+		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+		.r154x = { 0x0001, 0x07ff, 0x0897, 0x0465, 0x00c5, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0000 },
 	},
 };
 
@@ -279,6 +290,8 @@ struct blackmagic_device {
 	int fxstatus;
 	int recognized;
 	int encode_sent;
+
+	int current_display_mode;
 	struct display_mode *current_mode;
 
 	struct libusb_device_descriptor desc;
@@ -294,6 +307,18 @@ struct blackmagic_device {
 static void dostop(int sig)
 {
 	running = 0;
+}
+
+static void bmd_set_input_source(struct blackmagic_device *bmd, uint8_t mode)
+{
+	int r;
+	if (bmd->status != LIBUSB_SUCCESS)
+		return;
+	r = libusb_control_transfer(
+		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+		VR_SET_INPUT_SOURCE, 0x0000, 0, &mode, 1, 1000);
+	if (r < 0)
+		bmd->status = r;
 }
 
 static void bmd_read_register(struct blackmagic_device *bmd, uint8_t reg, uint8_t *value)
@@ -413,7 +438,14 @@ static int bmd_recognize_device(struct blackmagic_device *bmd)
 {
 	int i;
 
-	/* 0x84..0x87	firmware version, timestamp or checksum
+	bmd->recognized = 1;
+
+	/* Pro Recorder does not have a NIC */
+	if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER)
+		return 1;
+
+	/* ATEM TV Studio register layout:
+	 * 0x84..0x87	firmware version, timestamp or checksum
 	 *	4.1.2 -> 71 70 86 c6
 	 *	4.2.1 -> 7a 01 f1 34
 	 * 0x88..0x8d	mac address
@@ -429,8 +461,6 @@ static int bmd_recognize_device(struct blackmagic_device *bmd)
 		bmd->name,
 		bmd->mac[0], bmd->mac[1], bmd->mac[2],
 		bmd->mac[3], bmd->mac[4], bmd->mac[5]);
-
-	bmd->recognized = 1;
 
 	return bmd->status == LIBUSB_SUCCESS;
 }
@@ -482,7 +512,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	bmd_fujitsu_write(bmd, 0x08011c, 0x0000);
 
 	/* Group 2 - MPEG TS muxer */
-	bmd_fujitsu_write(bmd, 0x001000, current_mode->r1000); // 0x200=1080i, 0x500=720p
+	bmd_fujitsu_write(bmd, 0x001000, current_mode->r1000);
 	bmd_fujitsu_write(bmd, 0x001002, 0x8480);
 	bmd_fujitsu_write(bmd, 0x001004, 0x0002);
 	bmd_fujitsu_write(bmd, 0x001006, total_bandwidth / 1000);
@@ -506,8 +536,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	bmd_fujitsu_write(bmd, 0x001404, current_mode->r1404);
 	bmd_fujitsu_write(bmd, 0x001406, ep->video_max_kbps + 1000);
 	bmd_fujitsu_write(bmd, 0x001408, ep->video_kbps);
-	// r140a_l == 1=1080i 4=NTSC, 5=PAL, 0xff=720p
-	bmd_fujitsu_write(bmd, 0x00140a, 0x1700 | current_mode->r140a_l);
+	bmd_fujitsu_write(bmd, 0x00140a, current_mode->r140a);
 	bmd_fujitsu_write(bmd, 0x00140c, ep->h264_cabac ? 0x0000 : 0x0100);
 	bmd_fujitsu_write(bmd, 0x00140e, 0xd400 | ((current_mode->fps_denominator == 1) ? 0x0001 : 0x0000));
 	bmd_fujitsu_write(bmd, 0x001418, 0x0001);
@@ -515,7 +544,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	bmd_fujitsu_write(bmd, 0x001422, ep->video_max_kbps);
 	/* Register 0x1430 lower byte is related to INPUT MODE/TARGET MODE specific.
 	 *  affects directly the output stream resolution, possibly TS mode bits. */
-	bmd_fujitsu_write(bmd, 0x001430, 0xff | (ep->h264_bframes ? 0x0000 : 0x0100));
+	bmd_fujitsu_write(bmd, 0x001430, current_mode->r1430_l | (ep->h264_bframes ? 0x0000 : 0x0100));
 	bmd_fujitsu_write(bmd, 0x001470, current_mode->r147x[0]);
 	bmd_fujitsu_write(bmd, 0x001472, current_mode->r147x[1]);
 	bmd_fujitsu_write(bmd, 0x001474, current_mode->r147x[2]);
@@ -578,7 +607,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 		bmd_fujitsu_write(bmd, 0x00152e, ep->mode->dst_width);	// dst width
 		bmd_fujitsu_write(bmd, 0x001530, ep->mode->dst_height);// dst height (1088)
 		*/
-	} else if (current_mode->height == 1080) {
+	} else if (current_mode->convert_to_1088) {
 		/* Convert to height 1088 */
 		bmd_fujitsu_write(bmd, 0x001520, 0x80ff);
 		bmd_fujitsu_write(bmd, 0x001522, 0);			// src x offset
@@ -618,13 +647,71 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	return bmd->status == LIBUSB_SUCCESS;
 }
 
+static void bmd_encoder_dump(struct blackmagic_device *bmd)
+{
+	uint32_t fps_numerator;
+
+	fps_numerator = bmd_fujitsu_read(bmd, 0x0015a8);
+	fps_numerator <<= 16;
+	fps_numerator += bmd_fujitsu_read(bmd, 0x0015aa);
+	fps_numerator /= 2;
+
+	fprintf(stderr,
+		"-------------------------------------------------------\n"
+		"Detected mode: %02x\n"
+		".fps_numerator = %d, .fps_denominator = %d, .fx2_fps = 0x%x,\n"
+		".ain_offset = 0x%04x\n",
+		".r1000 = 0x%04x, .r1404 = 0x%04x, .r140a = 0x%04x, .r1430_l = 0x%02x\n"
+		".r147x = { 0x%02x, 0x%02x, 0x%02x, 0x%02x },\n"
+		".r154x = { 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x },\n"
+		"-------------------------------------------------------\n",
+		bmd->current_display_mode,
+
+		fps_numerator,
+		bmd_fujitsu_read(bmd, 0x0015a6),
+		(bmd_fujitsu_read(bmd, 0x080116) >> 3) & 0xf,
+
+		bmd_fujitsu_read(bmd, 0x001812),
+
+		bmd_fujitsu_read(bmd, 0x001000),
+		bmd_fujitsu_read(bmd, 0x001404),
+		bmd_fujitsu_read(bmd, 0x00140a),
+		bmd_fujitsu_read(bmd, 0x001430) & 0xff,
+
+		bmd_fujitsu_read(bmd, 0x001470),
+		bmd_fujitsu_read(bmd, 0x001472),
+		bmd_fujitsu_read(bmd, 0x001474),
+		bmd_fujitsu_read(bmd, 0x001476),
+
+		bmd_fujitsu_read(bmd, 0x001542),
+		bmd_fujitsu_read(bmd, 0x001544),
+		bmd_fujitsu_read(bmd, 0x001546),
+		bmd_fujitsu_read(bmd, 0x001548),
+		bmd_fujitsu_read(bmd, 0x00154a),
+		bmd_fujitsu_read(bmd, 0x00154c),
+		bmd_fujitsu_read(bmd, 0x00154e),
+		bmd_fujitsu_read(bmd, 0x001550),
+		bmd_fujitsu_read(bmd, 0x001552),
+		bmd_fujitsu_read(bmd, 0x001554)
+		);
+}
+
 static void bmd_encoder_start(struct blackmagic_device *bmd)
 {
 	const char *err;
 	uint8_t status;
 	int r;
 
+	if (bmd->current_display_mode == DMODE_invalid)
+		return;
+
 	bmd->encode_sent = 1;
+
+	if (!bmd->current_mode) {
+		if (verbose >= 2)
+			bmd_encoder_dump(bmd);
+		return;
+	}
 
 	if (verbose) fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
 	bmd_configure_encoder(bmd, &ep);
@@ -686,12 +773,16 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 			bmd->encode_sent = 0;
 			if (!bmd->recognized)
 				bmd_recognize_device(bmd);
-			if (bmd->running && bmd->current_mode && !bmd->encode_sent)
+			if (bmd->running && !bmd->encode_sent)
 				bmd_encoder_start(bmd);
+		} else if (bmd->fxstatus == FX2Status_Encoding) {
+			if (!bmd->encode_sent)
+				bmd_encoder_stop(bmd);
 		}
 		break;
 	case 0x05: /* Input connector */
 		dm = input_mode_to_display_mode(msg[1]);
+		bmd->current_display_mode = dm;
 		bmd->current_mode = display_modes[dm];
 
 		if (bmd->current_mode)
@@ -699,7 +790,11 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		else
 			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
 
-		if (bmd->running && bmd->fxstatus == FX2Status_Idle && bmd->current_mode && !bmd->encode_sent)
+		if (dm == DMODE_invalid && bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER) {
+			fprintf(stderr, "%s: Switching source to HDMI\n", bmd->name);
+			bmd_set_input_source(bmd, 1);
+			bmd->encode_sent = 0;
+		} else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
 			bmd_encoder_start(bmd);
 		break;
 	case 0x0d:
@@ -747,6 +842,7 @@ static void *bmd_device_thread(void *ctx)
 	int r, i;
 
 	bmd->running = 1;
+	bmd->current_display_mode = DMODE_invalid;
 
 	/* Immediately after hotplug, the sysfs device nodes are not yet
 	 * available. Unfortunately, libusb_open will disconnect mark device
