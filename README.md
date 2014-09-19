@@ -19,3 +19,10 @@ do "bmd-streamer | vlc -".
 
 Dependencies:
  * libusb (1.0.16 or newer) or libusbx
+
+The *lua* folder contains a set of scripts which can be used
+to create a studio control set. Currently support is enabled
+for:
+ * ATEM Video Mixers
+ * Panasonic AW-HE120 cameras
+ * Input devices to control (keyboard, mouse)
