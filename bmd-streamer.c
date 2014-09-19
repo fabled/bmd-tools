@@ -1,6 +1,6 @@
 /* BlackMagic Design tools - h264 stream over USB extractor
  * - ATEM TV Studio
- * - H264 Pro Encoder (not tested)
+ * - H264 Pro Encoder (limited support)
  *
  * These devices seem to use Fujitsu MB86H56 for encoding HD H264 video.
  * Getting technical datasheet to that chip would make things a lot clearer.
@@ -39,7 +39,7 @@
 
 struct encoding_parameters {
 	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
-	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac;
+	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac, fps_divider;
 };
 
 static int firmware_fd = AT_FDCWD;
@@ -55,6 +55,7 @@ static struct encoding_parameters ep = {
 	.h264_bframes = 1,
 	.audio_kbps = 256,
 	.audio_khz = 48000,
+	.fps_divider = 1,
 };
 
 enum DISPLAY_MODE {
@@ -629,17 +630,16 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	bmd_fujitsu_write(bmd, 0x0015a2, (current_mode->width + 15) >> 4);
 	bmd_fujitsu_write(bmd, 0x0015a4, (current_mode->height + 15) >> 4);
 	bmd_fujitsu_write(bmd, 0x0015a6, current_mode->fps_denominator); // divider
-	bmd_fujitsu_write(bmd, 0x0015a8, 2 * current_mode->fps_numerator >> 16);
-	bmd_fujitsu_write(bmd, 0x0015aa, 2 * current_mode->fps_numerator & 0xffff);
+	bmd_fujitsu_write(bmd, 0x0015a8, 2*current_mode->fps_numerator/ep->fps_divider >> 16);
+	bmd_fujitsu_write(bmd, 0x0015aa, 2*current_mode->fps_numerator/ep->fps_divider & 0xffff);
 	bmd_fujitsu_write(bmd, 0x0015ac, 0x0001); // {1=HD,2=PAL,3=NTSC} depends on target resolution
-	bmd_fujitsu_write(bmd, 0x0015b2, 0); // bit 0x8000 = set if source is 1280x720 and fps differs
-	#if 0
-	if (0 /* source is 1280x720 and fps differs */) {
+	if (ep->fps_divider != 1) {
 		/* Possibly input-output frame ratio */
-		bmd_fujitsu_write(bmd, 0x0015b2, 2);
+		bmd_fujitsu_write(bmd, 0x0015b2, 0x8000 | ep->fps_divider);
 		bmd_fujitsu_write(bmd, 0x0015b4, 1);
+	} else {
+		bmd_fujitsu_write(bmd, 0x0015b2, 0);
 	}
-	#endif
 
 	/* Group 6 - Enable */
 	bmd_fujitsu_write(bmd, 0x001144, 0x3333);
@@ -965,6 +965,7 @@ static int usage(void)
 		"	-B,--h264-no-bframes	Disable using H.264 B-frames\n"
 		"	-c,--h264-cabac		Allow using H.264 CABAC\n"
 		"	-C,--h264-no-cabac	Disable using H.264 CABAC\n"
+		"	-F,--fps-divider	Set framerate divider (input mode vs. encoded stream)\n"
 		"\n");
 	return 1;
 }
@@ -990,9 +991,10 @@ int main(int argc, char **argv)
 		{ "h264-no-bframes",	no_argument, NULL, 'B' },
 		{ "h264-cabac",		no_argument, NULL, 'c' },
 		{ "h264-no-cabac",	no_argument, NULL, 'C' },
+		{ "fps-divider",	required_argument, NULL, 'F' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBC";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1024,6 +1026,7 @@ int main(int argc, char **argv)
 		case 'B': ep.h264_bframes = 0; break;
 		case 'c': ep.h264_cabac = 1; break;
 		case 'C': ep.h264_cabac = 0; break;
+		case 'F': ep.fps_divider = atoi(optarg); if (ep.fps_divider<=0) ep.fps_divider=1; break;
 		default:
 			return usage();
 		}
