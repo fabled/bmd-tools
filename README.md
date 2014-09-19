@@ -17,9 +17,5 @@ and to stream out (currently to stdout) the MPEG TS stream
 from the device. For example, to dump stream to vlc you could
 do "bmd-streamer | vlc -".
 
-*bmd-control* is intended to control the ATEM TV studio. It
-is intended to be minimal implementation suitable to be called
-from hotkey handlers e.g. triggerhappy.
-
 Dependencies:
  * libusb (1.0.16 or newer) or libusbx

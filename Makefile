@@ -1,7 +1,7 @@
 LIBUSB_FLAGS += $(shell pkg-config --cflags --libs libusb-1.0)
 CFLAGS = -g -O3 #-Wall
 
-TOOLS = bmd-streamer bmd-extractfw bmd-control
+TOOLS = bmd-streamer bmd-extractfw
 
 all: $(TOOLS)
 
