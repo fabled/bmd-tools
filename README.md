@@ -21,8 +21,17 @@ Dependencies:
  * libusb (1.0.16 or newer) or libusbx
 
 The *lua* folder contains a set of scripts which can be used
-to create a studio control set. Currently support is enabled
-for:
+to create a studio control set. Currently supported:
  * ATEM Video Mixers
  * Panasonic AW-HE120 cameras
  * Input devices to control (keyboard, mouse)
+
+See example.lua how to build configuration. The rest of lua
+files are reusable components.
+
+Dependencies:
+ * lua >= 5.2
+ * lua-evdev
+ * lua-cqueues
+ * lua-struct
+
