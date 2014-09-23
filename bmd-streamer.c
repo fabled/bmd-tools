@@ -660,7 +660,7 @@ static void bmd_encoder_dump(struct blackmagic_device *bmd)
 		"-------------------------------------------------------\n"
 		"Detected mode: %02x\n"
 		".fps_numerator = %d, .fps_denominator = %d, .fx2_fps = 0x%x,\n"
-		".ain_offset = 0x%04x\n",
+		".ain_offset = 0x%04x\n"
 		".r1000 = 0x%04x, .r1404 = 0x%04x, .r140a = 0x%04x, .r1430_l = 0x%02x\n"
 		".r147x = { 0x%02x, 0x%02x, 0x%02x, 0x%02x },\n"
 		".r154x = { 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x },\n"
