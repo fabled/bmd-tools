@@ -80,18 +80,18 @@ enum DISPLAY_MODE {
 	DMODE_invalid,
 	DMODE_720x480p_59_94,
 	DMODE_720x576p_50,
-	DMODE_1920x1080p_23_976 = 5,
+	DMODE_1920x1080p_23_976,
 	DMODE_1920x1080p_24,
 	DMODE_1920x1080p_25,
-	DMODE_1920x1080p_29_97,
+	DMODE_1920x1080p_29_97,		/* 0x08 */
 	DMODE_1920x1080p_30,
 	DMODE_1920x1080i_25,
-	DMODE_1920x1080i_29_97, /* b */
+	DMODE_1920x1080i_29_97,
 	DMODE_1920x1080i_30,
 	DMODE_1920x1080p_50,
 	DMODE_1920x1080p_59_94,
 	DMODE_1920x1080p_60,
-	DMODE_1280x720p_50 = 0x10,
+	DMODE_1280x720p_50,		/* 0x10 */
 	DMODE_1280x720p_59_94,
 	DMODE_1280x720p_60,
 	DMODE_MAX
@@ -113,6 +113,29 @@ struct display_mode {
 };
 
 static struct display_mode *display_modes[DMODE_MAX] = {
+	/* DMODE_720x480i_29_97 */
+	/* DMODE_720x576i_30 */
+	/* DMODE_720x480p_59_94 */
+	/* DMODE_720x576p_50 */
+	/* DMODE_1920x1080p_23_976 */
+	/* DMODE_1920x1080p_24 */
+	[DMODE_1920x1080p_25] = &(struct display_mode){
+		.description = "1080p 25",
+		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
+		.ain_offset = 0x0708,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
+		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+		.r154x = { 0x0001, 0x07ff, 0x0abd, 0x0465, 0x00c3, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0019 },
+	},
+	/* DMODE_1920x1080p_29_97 */
+	[DMODE_1920x1080p_30] = &(struct display_mode){
+		.description = "1080p 30",
+		.fps_numerator = 30, .fps_denominator = 1, .fx2_fps = 0x5,
+		.ain_offset = 0x0a8c,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
+		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+		.r154x = { 0x0001, 0x07ff, 0x0897, 0x0465, 0x00c5, 0x0015, 0x07ff, 0x0780, 0x0438, 0x001e },
+	},
 	[DMODE_1920x1080i_25] = &(struct display_mode){
 		.description = "1080i 50",
 		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
@@ -121,15 +144,6 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.r1000 = 0x0200, .r1404 = 0x0041, .r140a = 0x1701, .r1430_l = 0xff,
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0034, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0780, 0x0438, 0x0000 },
-	},
-	[DMODE_1280x720p_50] = &(struct display_mode){
-		.description = "720p 50",
-		.width = 1280, .height = 720, .interlaced = 0,
-		.fps_numerator = 50, .fps_denominator = 1, .fx2_fps = 0x6,
-		.ain_offset = 0x0384,
-		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
-		.r147x = { 0x10, 0x70, 0x70, 0x10 },
-		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x0032 },
 	},
 	[DMODE_1920x1080i_29_97] = &(struct display_mode){
 		.description = "1080i 29.97",
@@ -140,15 +154,9 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0000, 0x0400, 0x0000 },
 	},
-	[DMODE_1280x720p_59_94] = &(struct display_mode){
-		.description = "720p 59.94",
-		.width = 1280, .height = 720, .interlaced = 0,
-		.fps_numerator = 60000, .fps_denominator = 1001, .fx2_fps = 0x7,
-		.ain_offset = 0x0384,
-		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
-		.r147x = { 0x10, 0x70, 0x70, 0x10 },
-		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x003c },
-	},
+	/* DMODE_1920x1080i_30 */
+	/* DMODE_1920x1080p_50 */
+	/* DMODE_1920x1080p_59_94 */
 	[DMODE_1920x1080p_60] = &(struct display_mode){
 		.description = "1080p 60",
 		.width = 1920, .height = 1080, .interlaced = 0,
@@ -158,21 +166,23 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0001, 0x07ff, 0x0897, 0x0465, 0x00c5, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0000 },
 	},
-	[DMODE_1920x1080p_25] = &(struct display_mode){
-		.description = "1080p 25",
-		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
-		.ain_offset = 0x0708,
+	[DMODE_1280x720p_50] = &(struct display_mode){
+		.description = "720p 50",
+		.width = 1280, .height = 720, .interlaced = 0,
+		.fps_numerator = 50, .fps_denominator = 1, .fx2_fps = 0x6,
+		.ain_offset = 0x0384,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
-		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
-		.r154x = { 0x0001, 0x07ff, 0x0abd, 0x0465, 0x00c3, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0019 },
+		.r147x = { 0x10, 0x70, 0x70, 0x10 },
+		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x0032 },
 	},
-	[DMODE_1920x1080p_30] = &(struct display_mode){
-		.description = "1080p 30",
-		.fps_numerator = 30, .fps_denominator = 1, .fx2_fps = 0x5,
-		.ain_offset = 0x0a8c,
+	[DMODE_1280x720p_59_94] = &(struct display_mode){
+		.description = "720p 59.94",
+		.width = 1280, .height = 720, .interlaced = 0,
+		.fps_numerator = 60000, .fps_denominator = 1001, .fx2_fps = 0x7,
+		.ain_offset = 0x0384,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
-		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
-		.r154x = { 0x0001, 0x07ff, 0x0897, 0x0465, 0x00c5, 0x0015, 0x07ff, 0x0780, 0x0438, 0x001e },
+		.r147x = { 0x10, 0x70, 0x70, 0x10 },
+		.r154x = { 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x003c },
 	},
 	[DMODE_1280x720p_60] = &(struct display_mode){
 		.description = "720p 60",
