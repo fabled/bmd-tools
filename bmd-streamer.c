@@ -1079,7 +1079,7 @@ int main(int argc, char **argv)
 		case 'B': ep.h264_bframes = 0; break;
 		case 'c': ep.h264_cabac = 1; break;
 		case 'C': ep.h264_cabac = 0; break;
-		case 'F': ep.fps_divider = atoi(optarg); if (ep.fps_divider<=0) ep.fps_divider=1; break;
+		case 'F': ep.fps_divider = atoi(optarg); break;
 		case 'S':
 			for (i = 0; i < array_size(input_source_names); i++)
 				if (strcmp(optarg, input_source_names[i]) == 0)
@@ -1092,6 +1092,9 @@ int main(int argc, char **argv)
 			return usage();
 		}
 	}
+
+	if (ep.fps_divider <= 0 || ep.fps_divider > 2) ep.fps_divider = 1;
+	if (ep.video_max_kbps < ep.video_kbps) ep.video_max_kbps = ep.video_kbps + 100;
 
 	firmwares[0] = load_firmware("bmd-atemtvstudio.bin", USB_PID_BMD_ATEM_TV_STUDIO);
 	firmwares[1] = load_firmware("bmd-h264prorecorder.bin", USB_PID_BMD_H264_PRO_RECORDER);
