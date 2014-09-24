@@ -115,6 +115,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	/* DMODE_1920x1080p_24 */
 	[DMODE_1920x1080p_25] = &(struct display_mode){
 		.description = "1080p 25",
+		.width = 1920, .height = 1080,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.ain_offset = 0x0708,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
@@ -124,6 +125,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	/* DMODE_1920x1080p_29_97 */
 	[DMODE_1920x1080p_30] = &(struct display_mode){
 		.description = "1080p 30",
+		.width = 1920, .height = 1080,
 		.fps_numerator = 30, .fps_denominator = 1, .fx2_fps = 0x5,
 		.ain_offset = 0x0a8c,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
@@ -180,6 +182,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_1280x720p_60] = &(struct display_mode){
 		.description = "720p 60",
+		.width = 1920, .height = 1080,
 		.fps_numerator = 60, .fps_denominator = 1, .fx2_fps = 0x8,
 		.ain_offset = 0x02ee,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
@@ -422,13 +425,11 @@ static void bmd_fujitsu_write(struct blackmagic_device *bmd, uint32_t reg, uint1
 	msg[3] = value >> 8;
 	msg[4] = value;
 
-#if 0
-	{
+	if (verbose >= 2) {
 		uint16_t oldvalue = bmd_fujitsu_read(bmd, reg);
 		if (value != oldvalue)
 			fprintf(stderr, "%s: fujitsu_write @%06x %04x != %04x\n", bmd->name, reg, value, oldvalue);
 	}
-#endif
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,  
