@@ -40,6 +40,7 @@
 struct encoding_parameters {
 	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
 	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac, fps_divider;
+	int8_t		input_source;
 };
 
 static int firmware_fd = AT_FDCWD;
@@ -56,6 +57,21 @@ static struct encoding_parameters ep = {
 	.audio_kbps = 256,
 	.audio_khz = 48000,
 	.fps_divider = 1,
+	.input_source = -1,
+};
+
+enum INPUT_SOURCE {
+	INPUT_SDI = 0,
+	INPUT_HDMI = 1,
+	INPUT_COMPOSITE = 3,
+};
+
+static const char *input_source_names[5] = {
+	[INPUT_SDI] = "sdi",
+	[INPUT_HDMI] = "hdmi",
+	[2] = "2", /* s-video or component */
+	[INPUT_COMPOSITE] = "composite",
+	[4] = "4", /* s-video or component */
 };
 
 enum DISPLAY_MODE {
@@ -814,11 +830,9 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		else
 			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
 
-		if (dm == DMODE_invalid && bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER) {
-			fprintf(stderr, "%s: Switching source to HDMI\n", bmd->name);
-			bmd_set_input_source(bmd, 1);
+		if (dm == DMODE_invalid)
 			bmd->encode_sent = 0;
-		} else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
+		else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
 			bmd_encoder_start(bmd);
 		break;
 	case 0x0d:
@@ -907,6 +921,14 @@ static void *bmd_device_thread(void *ctx)
 		}
 		fprintf(stderr, "%s: firmware %s\n", bmd->name, desc);
 	} else {
+		if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
+		    ep.input_source >= 0) {
+			fprintf(stderr, "%s: Switching input source to %s (%d)\n",
+				bmd->name, input_source_names[ep.input_source],
+				ep.input_source);
+			bmd_set_input_source(bmd, ep.input_source);
+		}
+
 		r = pthread_create(&bmd->mpegts_thread, NULL, bmd_pump_mpegts, bmd);
 		if (r < 0)
 			goto exit;
@@ -990,6 +1012,7 @@ static int usage(void)
 		"	-c,--h264-cabac		Allow using H.264 CABAC\n"
 		"	-C,--h264-no-cabac	Disable using H.264 CABAC\n"
 		"	-F,--fps-divider	Set framerate divider (input mode vs. encoded stream)\n"
+		"	-S,--input-source	Set input source. One of: sdi/hdmi/composite or value 0-5.\n"
 		"\n");
 	return 1;
 }
@@ -1016,9 +1039,10 @@ int main(int argc, char **argv)
 		{ "h264-cabac",		no_argument, NULL, 'c' },
 		{ "h264-no-cabac",	no_argument, NULL, 'C' },
 		{ "fps-divider",	required_argument, NULL, 'F' },
+		{ "input-source",	required_argument, NULL, 'S' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1051,6 +1075,14 @@ int main(int argc, char **argv)
 		case 'c': ep.h264_cabac = 1; break;
 		case 'C': ep.h264_cabac = 0; break;
 		case 'F': ep.fps_divider = atoi(optarg); if (ep.fps_divider<=0) ep.fps_divider=1; break;
+		case 'S':
+			for (i = 0; i < array_size(input_source_names); i++)
+				if (strcmp(optarg, input_source_names[i]) == 0)
+					break;
+			if (i >= array_size(input_source_names)) i = atoi(optarg);
+			if (i >= array_size(input_source_names)) i = -1;
+			ep.input_source = i;
+			break;
 		default:
 			return usage();
 		}
