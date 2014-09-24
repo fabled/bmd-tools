@@ -1,6 +1,6 @@
 /* BlackMagic Design tools - h264 stream over USB extractor
  * - ATEM TV Studio
- * - H264 Pro Encoder (limited support)
+ * - H264 Pro Encoder
  *
  * These devices seem to use Fujitsu MB86H56 for encoding HD H264 video.
  * Getting technical datasheet to that chip would make things a lot clearer.
@@ -60,16 +60,10 @@ static struct encoding_parameters ep = {
 	.input_source = -1,
 };
 
-enum INPUT_SOURCE {
-	INPUT_SDI = 0,
-	INPUT_HDMI = 1,
-	INPUT_COMPOSITE = 3,
-};
-
 static const char *input_source_names[5] = {
-	[INPUT_SDI] = "sdi",
+	[0] = "0", /* s-video or component */
 	[INPUT_HDMI] = "hdmi",
-	[2] = "2", /* s-video or component */
+	[INPUT_SDI] = "sdi",
 	[INPUT_COMPOSITE] = "composite",
 	[4] = "4", /* s-video or component */
 };
@@ -867,7 +861,7 @@ static void bmd_handle_messages(struct blackmagic_device *bmd)
 
 		/* The first 16-bits is the length of the full message */
 		if (verbose) {
-			fprintf(stderr, "EP8: %4d bytes:", actual_length);
+			fprintf(stderr, "%s: EP8: %4d bytes:", bmd->name, actual_length);
 			for (i = 0; i < actual_length; i++)
 				fprintf(stderr, " %02x", bmd->message_buffer[i]);
 			fprintf(stderr, "\n");
@@ -1022,7 +1016,7 @@ static int usage(void)
 		"	-c,--h264-cabac		Allow using H.264 CABAC\n"
 		"	-C,--h264-no-cabac	Disable using H.264 CABAC\n"
 		"	-F,--fps-divider	Set framerate divider (input mode vs. encoded stream)\n"
-		"	-S,--input-source	Set input source. One of: sdi/hdmi/composite or value 0-5.\n"
+		"	-S,--input-source	Set input source: sdi/hdmi/composite (or 0-5).\n"
 		"\n");
 	return 1;
 }
