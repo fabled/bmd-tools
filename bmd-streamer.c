@@ -182,7 +182,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_1280x720p_60] = &(struct display_mode){
 		.description = "720p 60",
-		.width = 1920, .height = 1080,
+		.width = 1280, .height = 720,
 		.fps_numerator = 60, .fps_denominator = 1, .fx2_fps = 0x8,
 		.ain_offset = 0x02ee,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
