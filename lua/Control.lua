@@ -90,7 +90,7 @@ function Control:pollInput(cq, devname)
 		local kps = {}
 		print(("opening input device %s"):format(devname))
 		local dev = evdev.Device(devname)
-		--dev:grab()
+		dev:grab()
 		while true do
 			cqueues.poll(dev)
 			local timestamp, eventType, eventCode, value = dev:read()
