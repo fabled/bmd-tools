@@ -42,6 +42,7 @@ function PanasonicAW:setTilt(speed)  self:awptz("T", "%02d", 50+speed) end
 function PanasonicAW:setPan(speed)   self:awptz("P", "%02d", 50+speed) end
 function PanasonicAW:setZoom(speed)  self:awptz("Z", "%02d", 50+speed) end
 function PanasonicAW:gotoPreset(no)  self:awptz("R", "%02d", no-1, true) end
+function PanasonicAW:programPreset(no) self:awptz("M", "%02d", no-1, true) end
 
 function PanasonicAW:run(cq, control)
 	cq:wrap(function()

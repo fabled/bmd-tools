@@ -8,6 +8,7 @@ local DummyCamera = {
 	setPan = nop,
 	setZoom = nop,
 	gotoPreset = nop,
+	programPreset = nop,
 	run = nop,
 }
 
