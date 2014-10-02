@@ -44,6 +44,10 @@ function AtemMixer:autoDownstreamKey(id)
 	self:sendCmd("DDsA", struct.pack(">i1i1i2", id, 0, 0))
 end
 
+function AtemMixer:setProgram(channel)
+	self:sendCmd("CPgI", struct.pack(">i2i2", 0, channel))
+end
+
 function AtemMixer:setPreview(channel)
 	self:sendCmd("CPvI", struct.pack(">i2i2", 0, channel))
 end
