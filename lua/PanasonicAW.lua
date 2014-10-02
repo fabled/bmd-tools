@@ -50,7 +50,7 @@ function PanasonicAW:run(cq, control)
 			q, self.cmdqueue = self.cmdqueue, {}
 			for cmd, val in pairs(q) do
 				local uri = ("/cgi-bin/aw_ptz?cmd=%%23%s%s&res=1"):format(cmd, val)
-				local status = http_get(self.ip, uri)
+				local status = pcall(http_get, self.ip, uri)
 				print("Posting", self.ip, uri, status)
 			end
 			if #self.cmdqueue == 0 then
