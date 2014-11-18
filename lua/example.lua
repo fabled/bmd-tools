@@ -56,6 +56,7 @@ local keymap = {
 		[k.KEY_0]		    = function(e) programOrGoto(e, c.cameras[5], 5) end,
 		[Input.MKEY_LSHIFT+k.KEY_3] = function(e) programOrGoto(e, c.cameras[5], 6) end,
 		[k.KEY_ENTER]		= function() c.mixer:doCut() end,
+		[k.KEY_ESC]		= function() c.mixer:doFadeToBlack() end,
 		[k.KEY_PROPS]		= function() c.mixer:autoDownstreamKey(0) end,
 		[k.KEY_SLEEP]		= function() local now = os.time() powerOnOff(now-lastpowerclick >= 2.0) lastpowerclick=now end,
 	}

@@ -36,6 +36,10 @@ function AtemMixer:sendCmd(cmd, data)
 	self:send(AtemMixer.CMD_ACKREQ, pkt)
 end
 
+function AtemMixer:doFadeToBlack()
+	self:sendCmd("FtbA", struct.pack(">i1i1i2", 0, 2, 0))
+end
+
 function AtemMixer:doCut()
 	self:sendCmd("DCut", struct.pack(">i4", 0))
 end
