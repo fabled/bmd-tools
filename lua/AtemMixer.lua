@@ -23,7 +23,8 @@ function AtemMixer:new(ip)
 end
 
 function AtemMixer:send(flags, payload, ack_id)
-	--print("sending to", self.ip)
+	-- print("sending to", self.ip)
+	if not self.connected then return end
 	self.sock:write(struct.pack(">HHHHHH", bit32.bor(6*2 + #payload, flags), self.atem_uid, ack_id or 0, 0, 0, self.packet_id) .. payload)
 	if bit32.band(flags, AtemMixer.CMD_ACK) == 0 then
 		self.packet_id = self.packet_id + 1
@@ -70,7 +71,11 @@ end
 
 function AtemMixer:recv()
 	local pkt, err = self.sock:read("*a")
-	if err then return false end
+	if err then
+		-- print(("AtemMixer: disconnected %s"):format(self.ip))
+		self.connected = false
+		return false
+	end
 	if #pkt < 6 then return true end
 
 	--print(("Got %d bytes from ATEM"):format(#pkt))
@@ -81,7 +86,11 @@ function AtemMixer:recv()
 	if bit32.band(flags, bit32.bor(AtemMixer.CMD_ACKREQ, AtemMixer.CMD_HELLO)) ~= 0 then
 		self:send(AtemMixer.CMD_ACK, "", packet_id)
 	end
-	if bit32.band(flags, AtemMixer.CMD_HELLO) ~= 0 then return true end
+	if bit32.band(flags, AtemMixer.CMD_HELLO) ~= 0 then
+		self.connected = true
+		-- print(("AtemMixer: connected %s"):format(self.ip))
+		return true
+	end
 
 	-- handle payload
 	local off = 12
@@ -98,9 +107,12 @@ end
 
 function AtemMixer:send_hello()
 	self.sock:settimeout(5)
+	self.sock:clearerr()
 	self.atem_uid = 0x1337
 	self.packet_id = 0
+	self.connected = true
 	self:send(AtemMixer.CMD_HELLO, string.char(0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00))
+	self.connected = false
 end
 
 function AtemMixer:run(cq, control)
