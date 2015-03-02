@@ -7,6 +7,7 @@
  */
 
 #include <math.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 
 #include <libusb.h>
@@ -322,7 +324,9 @@ static void mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 			i += 0xbc;
 			continue;
 		}
-		write(STDOUT_FILENO, &buf[i], 0xbc);
+		if (write(STDOUT_FILENO, &buf[i], 0xbc) < 0)
+			fprintf(stderr, "error writing MPEG TS: %s\n",
+				strerror(errno));
 		i += 0xbc;
 	}
 
@@ -471,6 +475,8 @@ static void *bmd_pump_mpegts(void *ctx)
 			&actual_length, 5000);
 		if (r != LIBUSB_SUCCESS && r != LIBUSB_ERROR_TIMEOUT)
 			break;
+		if (r == LIBUSB_ERROR_TIMEOUT)
+			fprintf(stderr, "%s: mpeg-ts pump: timeout reading data, retrying!\n", bmd->name);
 
 		mpegparser_parse(&bmd->mpegparser, actual_length);
 	} while (running && bmd->running);
@@ -1117,6 +1123,8 @@ int main(int argc, char **argv)
 		msg = "register callback", ec = 1;
 		goto error;
 	}
+
+	fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK);
 
 	while (running || num_workers)
 		libusb_handle_events(ctx);
