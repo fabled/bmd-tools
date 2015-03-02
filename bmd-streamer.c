@@ -72,7 +72,7 @@ static const char *input_source_names[5] = {
 
 enum DISPLAY_MODE {
 	DMODE_720x480i_29_97 = 0,
-	DMODE_720x576i_30,
+	DMODE_720x576i_25,
 	DMODE_invalid,
 	DMODE_720x480p_59_94,
 	DMODE_720x576p_50,
@@ -116,9 +116,9 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
-		.r154x = { 0x0000, 0x0002, 0x07ff, 0x035a, 0x020d, 0x008a, 0x002c, 0x07ff, 0x02d0, 0x01e8, 0x001e },
+		.r154x = { 0x1050, 0x0002, 0x07ff, 0x035a, 0x020d, 0x008a, 0x002c, 0x07ff, 0x02d0, 0x01e8, 0x001e },
 	},
-	[DMODE_720x576i_30] = &(struct display_mode){
+	[DMODE_720x576i_25] = &(struct display_mode){
 		.description = "576i 25",
 		.width = 720, .height = 576, .interlaced = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
@@ -294,7 +294,7 @@ static int input_mode_to_display_mode(uint8_t mode)
 
 	switch (mode) {
 	case 0x00: return DMODE_720x480i_29_97;
-	case 0x20: return DMODE_720x576i_30;
+	case 0x20: return DMODE_720x576i_25;
 	case 0x40: return DMODE_720x480p_59_94;
 	case 0x60: return DMODE_720x576p_50;
 	case 0x80: return DMODE_1920x1080i_30;
