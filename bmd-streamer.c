@@ -27,14 +27,12 @@
 
 /*
  * TODO and ideas:
- * - AIN_OFFSET, VR_SET_AUDIO_DELAY: test
+ * - Get VR_SET_AUDIO_DELAY for remaining modes from USB traces
  * - Handle resolution changes properly
  * - Selecting capture target format - now it's "Native (Progressive)"
  * - Per-device configuration to allow sending multiple streams to
  *   different sockets
- * - Consider rewriting the threaded implementation to state machines
- *   and asynchronous USB library usage. This would remove the few long
- *   timeouts while ending playback.
+ * - Make the capture thread cancellable
  */
 
 #define array_size(x) (sizeof(x) / sizeof(x[0]))
@@ -101,7 +99,7 @@ struct display_mode {
 	uint8_t		interlaced : 1;
 	uint8_t		convert_to_1088 : 1;
 	uint8_t		fx2_fps;
-
+	uint8_t		audio_delay;
 	uint16_t	ain_offset;
 	uint16_t	r1000, r1404, r140a, r1430_l;
 	uint16_t	r147x[4];
@@ -113,7 +111,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.description = "480i 29.97",
 		.width = 720, .height = 486, .interlaced = 1,
 		.fps_numerator = 30000, .fps_denominator = 1001, .fx2_fps = 0x4,
-		.ain_offset = 0x0000,
+		.audio_delay = 0x27, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x1050, 0x0002, 0x07ff, 0x035a, 0x020d, 0x008a, 0x002c, 0x07ff, 0x02d0, 0x01e8, 0x001e },
@@ -122,7 +120,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.description = "576i 25",
 		.width = 720, .height = 576, .interlaced = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
-		.ain_offset = 0x0000,
+		.audio_delay = 0x30, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x1050, 0x0000, 0x07ff, 0x0360, 0x0271, 0x0090, 0x002e, 0x07ff, 0x02d0, 0x0240, 0x0019 },
@@ -590,7 +588,7 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,  
-		VR_SET_AUDIO_DELAY, 0, 0, "\x00", 1, 5000);
+		VR_SET_AUDIO_DELAY, 0, 0, &current_mode->audio_delay, 1, 5000);
 	if (r < 0) {
 		bmd->status = r;
 		return 0;
