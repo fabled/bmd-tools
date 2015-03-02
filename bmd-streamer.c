@@ -769,7 +769,7 @@ static void bmd_encoder_dump(struct blackmagic_device *bmd)
 		".ain_offset = 0x%04x,\n"
 		".r1000 = 0x%04x, .r1404 = 0x%04x, .r140a = 0x%04x, .r1430_l = 0x%02x,\n"
 		".r147x = { 0x%02x, 0x%02x, 0x%02x, 0x%02x },\n"
-		".r154x = { 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x },\n"
+		".r154x = { 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x, 0x%04x },\n"
 		"-------------------------------------------------------\n",
 		bmd->current_display_mode,
 
@@ -789,6 +789,7 @@ static void bmd_encoder_dump(struct blackmagic_device *bmd)
 		bmd_fujitsu_read(bmd, 0x001474),
 		bmd_fujitsu_read(bmd, 0x001476),
 
+		bmd_fujitsu_read(bmd, 0x001540),
 		bmd_fujitsu_read(bmd, 0x001542),
 		bmd_fujitsu_read(bmd, 0x001544),
 		bmd_fujitsu_read(bmd, 0x001546),
