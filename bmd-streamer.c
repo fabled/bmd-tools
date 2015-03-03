@@ -110,7 +110,7 @@ struct display_mode {
 static struct display_mode *display_modes[DMODE_MAX] = {
 	[DMODE_720x480i_29_97] = &(struct display_mode){
 		.description = "480i 29.97",
-		.width = 720, .height = 486, .interlaced = 1,
+		.width = 720, .height = 486, .interlaced = 1, .program_fpga = 1,
 		.fps_numerator = 30000, .fps_denominator = 1001, .fx2_fps = 0x4,
 		.audio_delay = 0x27, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
@@ -119,7 +119,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_720x576i_25] = &(struct display_mode){
 		.description = "576i 25",
-		.width = 720, .height = 576, .interlaced = 1,
+		.width = 720, .height = 576, .interlaced = 1, .program_fpga = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.audio_delay = 0x30, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
