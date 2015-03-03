@@ -916,12 +916,21 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 
 		if (bmd->current_mode)
 			fprintf(stderr, "%s: Display Mode: %s\n", bmd->name, bmd->current_mode->description);
+		else if (dm == DMODE_invalid)
+			fprintf(stderr, "%s: No Signal\n", bmd->name);
 		else
 			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
 
-		if (dm == DMODE_invalid)
+		if (dm == DMODE_invalid) {
 			bmd->encode_sent = 0;
-		else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
+			if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
+			    ep.input_source >= 0) {
+				fprintf(stderr, "%s: Switching input source to %s (%d)\n",
+					bmd->name, input_source_names[ep.input_source],
+					ep.input_source);
+				bmd_set_input_source(bmd, ep.input_source);
+			}
+		} else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
 			bmd_encoder_start(bmd);
 		break;
 	case 0x0d:
