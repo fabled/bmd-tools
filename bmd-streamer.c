@@ -97,6 +97,7 @@ struct display_mode {
 	int		fps_numerator, fps_denominator;
 
 	uint8_t		interlaced : 1;
+	uint8_t		program_fpga : 1;
 	uint8_t		convert_to_1088 : 1;
 	uint8_t		fx2_fps;
 	uint8_t		audio_delay;
@@ -585,6 +586,29 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	total_bandwidth += (ep->audio_kbps * 1000.0 * 1024 / (8 * ep->audio_khz) + 14) / 148 * 1504.0 * ep->audio_khz / 1024;
 	total_bandwidth += 48128.0 * fps / ((fps == 25 || fps == 50) ? 12 : 15);
 	total_bandwidth += 1.021739130434783 * (ceil(1464*fps) + ceil(152*fps) + (ep->video_max_kbps + 1000) * 1000);
+
+	if (current_mode->program_fpga) {
+		uint8_t send_fpga_command[1] = { 0x20 };
+		uint8_t clear_fpga_command[1] = { 0x40 };
+
+                r = libusb_control_transfer(
+                        bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+                        VR_SEND_FPGA_COMMAND, 0, 0,
+                        send_fpga_command, sizeof(send_fpga_command), 1000);
+		if (r < 0) {
+			bmd->status = r;
+			return 0;
+		}
+
+		r = libusb_control_transfer(
+			bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+			VR_CLEAR_FPGA_COMMAND, 0, 0,
+			clear_fpga_command, sizeof(clear_fpga_command), 1000);
+		if (r < 0) {
+			bmd->status = r;
+			return 0;
+		}
+	}
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,  
