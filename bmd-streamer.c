@@ -61,11 +61,11 @@ static struct encoding_parameters ep = {
 };
 
 static const char *input_source_names[5] = {
-	[0] = "0", /* s-video or component */
+	[INPUT_COMPONENT] = "component",
 	[INPUT_HDMI] = "hdmi",
 	[INPUT_SDI] = "sdi",
 	[INPUT_COMPOSITE] = "composite",
-	[4] = "4", /* s-video or component */
+	[INPUT_SVIDEO] = "s-video",
 };
 
 enum DISPLAY_MODE {
@@ -1103,14 +1103,15 @@ static int usage(void)
 		"	-k,--video-kbps		Set average video bitrate\n"
 		"	-K,--video-max-kbps	Set maximum video bitrate\n"
 		"	-a,--audio-kbps		Set audio bitrate\n"
-		"	-P,--h264-profile	Set H.264 profile (high,main,baseline)\n"
+		"	-P,--h264-profile	Set H.264 profile (high, main, baseline)\n"
 		"	-L,--h264-level		Set H.264 level (40 = level 4.0, etc..)\n"
 		"	-b,--h264-bframes	Allow using H.264 B-frames\n"
 		"	-B,--h264-no-bframes	Disable using H.264 B-frames\n"
 		"	-c,--h264-cabac		Allow using H.264 CABAC\n"
 		"	-C,--h264-no-cabac	Disable using H.264 CABAC\n"
-		"	-F,--fps-divider	Set framerate divider (input mode vs. encoded stream)\n"
-		"	-S,--input-source	Set input source: sdi/hdmi/composite (or 0-5).\n"
+		"	-F,--fps-divider	Set framerate divider (input / stream)\n"
+		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
+		"				composite, s-video, or 0-4)\n"
 		"\n");
 	return 1;
 }
