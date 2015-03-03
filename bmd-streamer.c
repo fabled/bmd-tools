@@ -28,7 +28,6 @@
 /*
  * TODO and ideas:
  * - Get VR_SET_AUDIO_DELAY for remaining modes from USB traces
- * - Handle resolution changes properly
  * - Selecting capture target format - now it's "Native (Progressive)"
  * - Per-device configuration to allow sending multiple streams to
  *   different sockets
@@ -867,6 +866,8 @@ static void bmd_encoder_stop(struct blackmagic_device *bmd)
 	int i, r;
 
 	/* Stop recording */
+	if (verbose) fprintf(stderr, "%s: Stopping encoder\n", bmd->name);
+
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR,
 		VR_FUJITSU_STOP_ENCODING, 0, 0, &status, sizeof(status), 1000);
@@ -921,8 +922,13 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		else
 			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
 
+		if (!bmd->running)
+			break;
+
+		if (bmd->encode_sent)
+			bmd_encoder_stop(bmd);
+
 		if (dm == DMODE_invalid) {
-			bmd->encode_sent = 0;
 			if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
 			    ep.input_source >= 0) {
 				fprintf(stderr, "%s: Switching input source to %s (%d)\n",
@@ -930,8 +936,10 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 					ep.input_source);
 				bmd_set_input_source(bmd, ep.input_source);
 			}
-		} else if (bmd->running && bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
-			bmd_encoder_start(bmd);
+		} else {
+			if (bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
+				bmd_encoder_start(bmd);
+		}
 		break;
 	case 0x0d:
 		fprintf(stderr, "%s: H56 Error. Restarting device.\n", bmd->name);
