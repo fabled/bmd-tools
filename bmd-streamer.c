@@ -6,8 +6,10 @@
  * Getting technical datasheet to that chip would make things a lot clearer.
  */
 
+#define _GNU_SOURCE
 #include <math.h>
 #include <errno.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -29,8 +31,6 @@
  * TODO and ideas:
  * - Get VR_SET_AUDIO_DELAY for remaining modes from USB traces
  * - Selecting capture target format - now it's "Native (Progressive)"
- * - Per-device configuration to allow sending multiple streams to
- *   different sockets
  * - Make the capture thread cancellable
  */
 
@@ -40,6 +40,7 @@ struct encoding_parameters {
 	uint16_t	video_kbps, video_max_kbps, audio_kbps, audio_khz;
 	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac, fps_divider;
 	int8_t		input_source;
+	char *		exec_program;
 };
 
 static int firmware_fd = AT_FDCWD;
@@ -354,12 +355,13 @@ error:
 }
 
 struct mpeg_parser_buffer {
+	int output_fd;
 	int oldlen;
 	unsigned char olddata[0xbc];
 	unsigned char data[16*1024];
 };
 
-static void mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
+static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 {
 	unsigned char *buf = &pb->data[-pb->oldlen];
 	int i = 0, len = newlen + pb->oldlen;
@@ -378,14 +380,20 @@ static void mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 			i += 0xbc;
 			continue;
 		}
-		if (write(STDOUT_FILENO, &buf[i], 0xbc) < 0)
-			fprintf(stderr, "error writing MPEG TS: %s\n",
-				strerror(errno));
+		if (pb->output_fd >= 0) {
+			if (write(pb->output_fd, &buf[i], 0xbc) < 0) {
+				fprintf(stderr, "error writing MPEG TS: %s\n",
+					strerror(errno));
+				if (errno == EPIPE)
+					return -1;
+			}
+		}
 		i += 0xbc;
 	}
 
 	pb->oldlen = len - i;
 	memcpy(&pb->data[-pb->oldlen], &buf[i], pb->oldlen);
+	return 0;
 }
 
 struct blackmagic_device {
@@ -409,6 +417,13 @@ struct blackmagic_device {
 	uint8_t message_buffer[1024];
 	struct mpeg_parser_buffer mpegparser;
 };
+
+static void reapchildren(int sig)
+{
+	int status;
+
+	while (waitpid(-1, &status, WNOHANG) == 0 || errno == EINTR);
+}
 
 static void dostop(int sig)
 {
@@ -532,7 +547,12 @@ static void *bmd_pump_mpegts(void *ctx)
 		if (r == LIBUSB_ERROR_TIMEOUT)
 			fprintf(stderr, "%s: mpeg-ts pump: timeout reading data, retrying!\n", bmd->name);
 
-		mpegparser_parse(&bmd->mpegparser, actual_length);
+		if (mpegparser_parse(&bmd->mpegparser, actual_length) < 0) {
+			if (ep.exec_program)
+				bmd->running = 0;
+			else
+				running = 0;
+		}
 	} while (running && bmd->running);
 
 	if (verbose) fprintf(stderr, "%s: mpeg-ts pump exiting: %s\n", bmd->name, libusb_error_name(r));
@@ -842,7 +862,41 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	}
 
 	if (verbose) fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
-	bmd_configure_encoder(bmd, &ep);
+
+	if (!bmd_configure_encoder(bmd, &ep)) {
+		err = "configuring encoder";
+		goto error;
+	}
+
+	if (ep.exec_program) {
+		char *argv[] = { ep.exec_program, 0 };
+		int pipefd[2];
+		posix_spawn_file_actions_t fa;
+
+		if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
+
+		if (pipe(pipefd) < 0) {
+			err = "create pipe for child process";
+			goto error;
+		}
+
+		posix_spawn_file_actions_init(&fa);
+		posix_spawn_file_actions_adddup2(&fa, pipefd[0], STDIN_FILENO);
+		posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+		r = posix_spawnp(NULL, argv[0], &fa, NULL, argv, environ);
+		posix_spawn_file_actions_destroy(&fa);
+
+		close(pipefd[0]);
+		if (r != 0) {
+			close(pipefd[1]);
+			err = "launch exec program";
+			goto error;
+		}
+
+		bmd->mpegparser.output_fd = pipefd[1];
+	} else {
+		bmd->mpegparser.output_fd = STDOUT_FILENO;
+	}
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR,
@@ -857,6 +911,15 @@ error:
 	fprintf(stderr, "%s: failed to %s\n", bmd->name, err);
 }
 
+static void bmd_kill_exec_program(struct blackmagic_device *bmd)
+{
+	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
+		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
+		close(bmd->mpegparser.output_fd);
+	}
+	bmd->mpegparser.output_fd = -1;
+}
+
 static void bmd_encoder_stop(struct blackmagic_device *bmd)
 {
 	uint8_t status;
@@ -867,6 +930,7 @@ static void bmd_encoder_stop(struct blackmagic_device *bmd)
 
 	/* Stop recording */
 	if (verbose) fprintf(stderr, "%s: Stopping encoder\n", bmd->name);
+	bmd_kill_exec_program(bmd);
 
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR,
@@ -949,7 +1013,7 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 	}
 }
 
-static void bmd_handle_messages(struct blackmagic_device *bmd)
+static void bmd_handle_messages(struct blackmagic_device *bmd, int force)
 {
 	int actual_length, r, i;
 
@@ -972,7 +1036,7 @@ static void bmd_handle_messages(struct blackmagic_device *bmd)
 		for (i = 2; bmd->message_buffer[i] != 0 && i < actual_length;
 		     i += bmd->message_buffer[i] + 1)
 			bmd_parse_message(bmd, &bmd->message_buffer[i+1]);
-	} while (running && bmd->running);
+	} while ((force && bmd->fxstatus != FX2Status_Idle) || (running && bmd->running));
 
 	if (r != LIBUSB_SUCCESS) {
 		if (verbose) fprintf(stderr, "%s: message reader exiting: %s\n", bmd->name, libusb_error_name(r));
@@ -987,6 +1051,7 @@ static void *bmd_device_thread(void *ctx)
 
 	bmd->running = 1;
 	bmd->current_display_mode = DMODE_invalid;
+	bmd->mpegparser.output_fd = -1;
 
 	/* Immediately after hotplug, the sysfs device nodes are not yet
 	 * available. Unfortunately, libusb_open will disconnect mark device
@@ -1043,7 +1108,7 @@ static void *bmd_device_thread(void *ctx)
 			bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
 			VR_SEND_DEVICE_STATUS, 0, 0, 0, 0, 1000);
 		if (r == LIBUSB_SUCCESS)
-			bmd_handle_messages(bmd);
+			bmd_handle_messages(bmd, 0);
 
 		bmd->running = 0;
 		if (bmd->mpegts_thread)
@@ -1052,12 +1117,13 @@ static void *bmd_device_thread(void *ctx)
 		if (bmd->fxstatus == FX2Status_Encoding && bmd->status == LIBUSB_SUCCESS) {
 			bmd_encoder_stop(bmd);
 			while (bmd->fxstatus != FX2Status_Idle && bmd->status == LIBUSB_SUCCESS)
-				bmd_handle_messages(bmd);
+				bmd_handle_messages(bmd, 1);
 		}
 	}
 
 exit:
 	fprintf(stderr, "%s: closing device\n", bmd->name);
+	bmd_kill_exec_program(bmd);
 	libusb_close(bmd->usbdev_handle);
 	libusb_unref_device(bmd->usbdev);
 	free(bmd);
@@ -1120,6 +1186,7 @@ static int usage(void)
 		"	-F,--fps-divider	Set framerate divider (input / stream)\n"
 		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
 		"				composite, s-video, or 0-4)\n"
+		"	-e,--execute		Program to execute for each connected stream\n"
 		"\n");
 	return 1;
 }
@@ -1147,21 +1214,25 @@ int main(int argc, char **argv)
 		{ "h264-no-cabac",	no_argument, NULL, 'C' },
 		{ "fps-divider",	required_argument, NULL, 'F' },
 		{ "input-source",	required_argument, NULL, 'S' },
+		{ "execute",		required_argument, NULL, 'e' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:e:";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
 	const char *msg = NULL;
 	int i, r, ec = 0, opt, optindex;
 
+	signal(SIGCHLD, reapchildren);
 	signal(SIGTERM, dostop);
 	signal(SIGINT, dostop);
+	signal(SIGPIPE, SIG_IGN);
 
 	optindex = 0;
 	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
 		switch (opt) {
+		case 'e': ep.exec_program = optarg; break;
 		case 'f':
 			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY)) < 0) {
 				perror("open");
