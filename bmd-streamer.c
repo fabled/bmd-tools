@@ -40,6 +40,7 @@ struct encoding_parameters {
 	uint8_t		h264_profile, h264_level, h264_bframes, h264_cabac, fps_divider;
 	int8_t		input_source;
 	char *		exec_program;
+	int		respawn : 1;
 };
 
 static int firmware_fd = AT_FDCWD;
@@ -363,7 +364,7 @@ struct mpeg_parser_buffer {
 static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 {
 	unsigned char *buf = &pb->data[-pb->oldlen];
-	int i = 0, len = newlen + pb->oldlen;
+	int i = 0, len = newlen + pb->oldlen, r = 0;
 
 	while (i + 0xbc <= len) {
 		if (memcmp(&buf[i], "\x00\x00\x00\x00", 4) == 0) {
@@ -379,12 +380,11 @@ static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 			i += 0xbc;
 			continue;
 		}
-		if (pb->output_fd >= 0) {
+		if (pb->output_fd >= 0 && r == 0) {
 			if (write(pb->output_fd, &buf[i], 0xbc) < 0) {
 				fprintf(stderr, "error writing MPEG TS: %s\n",
 					strerror(errno));
-				if (errno == EPIPE)
-					return -1;
+				if (errno == EPIPE) r = -1;
 			}
 		}
 		i += 0xbc;
@@ -392,7 +392,7 @@ static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 
 	pb->oldlen = len - i;
 	memcpy(&pb->data[-pb->oldlen], &buf[i], pb->oldlen);
-	return 0;
+	return r;
 }
 
 struct blackmagic_device {
@@ -531,6 +531,63 @@ static int bmd_upload_firmware(struct blackmagic_device *bmd, struct firmware *f
 	return bmd->status == LIBUSB_SUCCESS;
 }
 
+static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
+{
+	char tmp[1024];
+	char *envp[16];
+	char *argv[] = { exec_program, 0 };
+	int r, i, p, pipefd[2];
+	posix_spawn_file_actions_t fa;
+
+	if (!exec_program) {
+		bmd->mpegparser.output_fd = STDOUT_FILENO;
+		return 1;
+	}
+
+	if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
+
+	if (pipe(pipefd) < 0)
+		return 0;
+
+	i = p = 0;
+	if (bmd->desc.idProduct != USB_PID_BMD_H264_PRO_RECORDER) {
+		envp[i++] = &tmp[p];
+		p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_MAC=%02x%02x%02x%02x%02x%02x",
+			bmd->mac[0], bmd->mac[1], bmd->mac[2], bmd->mac[3], bmd->mac[4], bmd->mac[5]) + 1;
+	}
+	envp[i++] = &tmp[p];
+	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_WIDTH=%d", bmd->current_mode->width) + 1;
+	envp[i++] = &tmp[p];
+	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_HEIGHT=%d", bmd->current_mode->height) + 1;
+	envp[i] = 0;
+
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_adddup2(&fa, pipefd[0], STDIN_FILENO);
+	posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+	r = posix_spawnp(NULL, argv[0], &fa, NULL, argv, envp);
+	posix_spawn_file_actions_destroy(&fa);
+
+	close(pipefd[0]);
+	if (r != 0) {
+		close(pipefd[1]);
+		return 0;
+	}
+
+	bmd->mpegparser.output_fd = pipefd[1];
+	fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
+	return 1;
+}
+
+static void bmd_kill_exec_program(struct blackmagic_device *bmd)
+{
+	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
+		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
+		close(bmd->mpegparser.output_fd);
+	}
+	bmd->mpegparser.output_fd = -1;
+}
+
+
 static void *bmd_pump_mpegts(void *ctx)
 {
 	struct blackmagic_device *bmd = ctx;
@@ -547,9 +604,14 @@ static void *bmd_pump_mpegts(void *ctx)
 			fprintf(stderr, "%s: mpeg-ts pump: timeout reading data, retrying!\n", bmd->name);
 
 		if (mpegparser_parse(&bmd->mpegparser, actual_length) < 0) {
-			if (ep.exec_program)
-				bmd->running = 0;
-			else
+			if (ep.exec_program) {
+				if (ep.respawn) {
+					bmd_kill_exec_program(bmd);
+					bmd_start_exec_program(bmd, ep.exec_program);
+				} else {
+					bmd->running = 0;
+				}
+			} else
 				running = 0;
 		}
 	} while (running && bmd->running);
@@ -837,62 +899,6 @@ static void bmd_encoder_dump(struct blackmagic_device *bmd)
 		bmd_fujitsu_read(bmd, 0x001552),
 		bmd_fujitsu_read(bmd, 0x001554)
 		);
-}
-
-static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
-{
-	char tmp[1024];
-	char *envp[16];
-	char *argv[] = { exec_program, 0 };
-	int r, i, p, pipefd[2];
-	posix_spawn_file_actions_t fa;
-
-	if (!exec_program) {
-		bmd->mpegparser.output_fd = STDOUT_FILENO;
-		return 1;
-	}
-
-	if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
-
-	if (pipe(pipefd) < 0)
-		return 0;
-
-	i = p = 0;
-	if (bmd->desc.idProduct != USB_PID_BMD_H264_PRO_RECORDER) {
-		envp[i++] = &tmp[p];
-		p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_MAC=%02x%02x%02x%02x%02x%02x",
-			bmd->mac[0], bmd->mac[1], bmd->mac[2], bmd->mac[3], bmd->mac[4], bmd->mac[5]) + 1;
-	}
-	envp[i++] = &tmp[p];
-	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_WIDTH=%d", bmd->current_mode->width) + 1;
-	envp[i++] = &tmp[p];
-	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_HEIGHT=%d", bmd->current_mode->height) + 1;
-	envp[i] = 0;
-
-	posix_spawn_file_actions_init(&fa);
-	posix_spawn_file_actions_adddup2(&fa, pipefd[0], STDIN_FILENO);
-	posix_spawn_file_actions_addclose(&fa, pipefd[1]);
-	r = posix_spawnp(NULL, argv[0], &fa, NULL, argv, envp);
-	posix_spawn_file_actions_destroy(&fa);
-
-	close(pipefd[0]);
-	if (r != 0) {
-		close(pipefd[1]);
-		return 0;
-	}
-
-	bmd->mpegparser.output_fd = pipefd[1];
-	fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
-	return 1;
-}
-
-static void bmd_kill_exec_program(struct blackmagic_device *bmd)
-{
-	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
-		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
-		close(bmd->mpegparser.output_fd);
-	}
-	bmd->mpegparser.output_fd = -1;
 }
 
 static void bmd_encoder_start(struct blackmagic_device *bmd)
@@ -1240,9 +1246,10 @@ int main(int argc, char **argv)
 		{ "fps-divider",	required_argument, NULL, 'F' },
 		{ "input-source",	required_argument, NULL, 'S' },
 		{ "execute",		required_argument, NULL, 'e' },
+		{ "respawn",		no_argument, NULL, 'R' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:e:";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:e:R";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1258,6 +1265,7 @@ int main(int argc, char **argv)
 	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
 		switch (opt) {
 		case 'e': ep.exec_program = optarg; break;
+		case 'R': ep.respawn = 1; break;
 		case 'f':
 			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY)) < 0) {
 				perror("open");
