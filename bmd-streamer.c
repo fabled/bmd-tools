@@ -1217,7 +1217,8 @@ static int usage(void)
 		"	-F,--fps-divider	Set framerate divider (input / stream)\n"
 		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
 		"				composite, s-video, or 0-4)\n"
-		"	-e,--execute		Program to execute for each connected stream\n"
+		"	-x,--execute		Program to execute for each connected stream\n"
+		"	-R,--respawn		Restart execute program if it exits\n"
 		"\n");
 	return 1;
 }
@@ -1245,11 +1246,11 @@ int main(int argc, char **argv)
 		{ "h264-no-cabac",	no_argument, NULL, 'C' },
 		{ "fps-divider",	required_argument, NULL, 'F' },
 		{ "input-source",	required_argument, NULL, 'S' },
-		{ "execute",		required_argument, NULL, 'e' },
+		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:e:R";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:x:R";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1264,7 +1265,7 @@ int main(int argc, char **argv)
 	optindex = 0;
 	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
 		switch (opt) {
-		case 'e': ep.exec_program = optarg; break;
+		case 'x': ep.exec_program = optarg; break;
 		case 'R': ep.respawn = 1; break;
 		case 'f':
 			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY)) < 0) {
