@@ -593,6 +593,8 @@ static int bmd_recognize_device(struct blackmagic_device *bmd)
 
 static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_parameters *ep)
 {
+	uint8_t fpga_command_1[1] = { 0x20 };
+	uint8_t fpga_command_2[1] = { 0x40 };
 	struct display_mode *current_mode = bmd->current_mode;
 	uint32_t total_bandwidth;
 	float fps;
@@ -606,27 +608,21 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	total_bandwidth += 48128.0 * fps / ((fps == 25 || fps == 50) ? 12 : 15);
 	total_bandwidth += 1.021739130434783 * (ceil(1464*fps) + ceil(152*fps) + (ep->video_max_kbps + 1000) * 1000);
 
-	if (current_mode->program_fpga) {
-		uint8_t send_fpga_command[1] = { 0x20 };
-		uint8_t clear_fpga_command[1] = { 0x40 };
-
-                r = libusb_control_transfer(
-                        bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
-                        VR_SEND_FPGA_COMMAND, 0, 0,
-                        send_fpga_command, sizeof(send_fpga_command), 1000);
-		if (r < 0) {
-			bmd->status = r;
-			return 0;
-		}
-
-		r = libusb_control_transfer(
-			bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
-			VR_CLEAR_FPGA_COMMAND, 0, 0,
-			clear_fpga_command, sizeof(clear_fpga_command), 1000);
-		if (r < 0) {
-			bmd->status = r;
-			return 0;
-		}
+	r = libusb_control_transfer(
+		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+		current_mode->program_fpga ? VR_SEND_FPGA_COMMAND : VR_CLEAR_FPGA_COMMAND, 0, 0,
+		fpga_command_1, sizeof(fpga_command_1), 1000);
+	if (r < 0) {
+		bmd->status = r;
+		return 0;
+	}
+	r = libusb_control_transfer(
+		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
+		VR_CLEAR_FPGA_COMMAND, 0, 0,
+		fpga_command_2, sizeof(fpga_command_2), 1000);
+	if (r < 0) {
+		bmd->status = r;
+		return 0;
 	}
 
 	r = libusb_control_transfer(
