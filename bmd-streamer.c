@@ -185,7 +185,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_1920x1080i_30] = &(struct display_mode){
 		.description = "1080i 30",
-		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
+		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1, .program_fpga = 1,
 		.fps_numerator = 30, .fps_denominator = 1, .fx2_fps = 0x5,
 		.ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
