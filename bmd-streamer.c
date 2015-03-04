@@ -950,9 +950,9 @@ static void bmd_encoder_stop(struct blackmagic_device *bmd)
 	}
 }
 
-static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
+static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg, int msg_len)
 {
-	int dm;
+	int i, dm;
 
 	switch (msg[0]) {
 	case 0x01: /* Status update */
@@ -1006,6 +1006,14 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg)
 		break;
 	case 0x0e: /* Timestamp update? */
 		break;
+	default:
+		if (verbose) {
+			fprintf(stderr, "%s: Unknown message ", bmd->name);
+			for (i = 0; i < msg_len; i++)
+				fprintf(stderr, " %02x", msg[i]);
+			fprintf(stderr, "\n");
+		}
+		break;
 	}
 }
 
@@ -1031,7 +1039,7 @@ static void bmd_handle_messages(struct blackmagic_device *bmd, int force)
 
 		for (i = 2; bmd->message_buffer[i] != 0 && i < actual_length;
 		     i += bmd->message_buffer[i] + 1)
-			bmd_parse_message(bmd, &bmd->message_buffer[i+1]);
+			bmd_parse_message(bmd, &bmd->message_buffer[i+1], bmd->message_buffer[i]);
 	} while ((force && bmd->fxstatus != FX2Status_Idle) || (running && bmd->running));
 
 	if (r != LIBUSB_SUCCESS) {
