@@ -10,12 +10,14 @@
 #include <errno.h>
 #include <spawn.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <signal.h>
 #include <string.h>
+#include <syslog.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -43,8 +45,9 @@ struct encoding_parameters {
 	int		respawn : 1;
 };
 
+static int do_syslog = 0;
+static int loglevel = LOG_NOTICE;
 static int firmware_fd = AT_FDCWD;
-static int verbose = 0;
 static int running = 1;
 static volatile int num_workers = 0;
 static struct encoding_parameters ep = {
@@ -314,6 +317,32 @@ static int input_mode_to_display_mode(uint8_t mode)
 	}
 }
 
+static void hexdump(char *buf, size_t buflen, const char *ptr, size_t ptrlen)
+{
+	int i;
+
+	for (i = 0; i < ptrlen && (i+1)*2+1 <= buflen; i++)
+		snprintf(&buf[i*2], 3, "%02x", (unsigned char) ptr[i]);
+}
+
+static void dlog(int prio, const char *format, ...)
+{
+	va_list va;
+
+	if (prio > loglevel) return;
+
+	va_start(va, format);
+	if (do_syslog)
+		vsyslog(prio, format, va);
+	else {
+		flockfile(stderr);
+		vfprintf(stderr, format, va);
+		fputc('\n', stderr);
+		funlockfile(stderr);
+	}
+	va_end(va);
+}
+
 struct firmware {
 	uint32_t	size;
 	uint16_t	device_id;
@@ -330,7 +359,7 @@ static struct firmware *load_firmware(const char *filename, uint16_t device_id)
 
 	r = fstatat(firmware_fd, filename, &st, 0);
 	if (r != 0) {
-		fprintf(stderr, "%s: failed to load firmware to memory\n", filename);
+		dlog(LOG_ERR, "%s: failed to load firmware to memory", filename);
 		return NULL;
 	}
 
@@ -382,7 +411,7 @@ static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 		}
 		if (pb->output_fd >= 0 && r == 0) {
 			if (write(pb->output_fd, &buf[i], 0xbc) < 0) {
-				fprintf(stderr, "error writing MPEG TS: %s\n",
+				dlog(LOG_NOTICE, "error writing MPEG TS: %s",
 					strerror(errno));
 				if (errno == EPIPE) r = -1;
 			}
@@ -434,6 +463,8 @@ static void bmd_set_input_source(struct blackmagic_device *bmd, uint8_t mode)
 	int r;
 	if (bmd->status != LIBUSB_SUCCESS)
 		return;
+	dlog(LOG_NOTICE, "%s: switching input source to %s (%d)",
+		bmd->name, input_source_names[mode], mode);
 	r = libusb_control_transfer(
 		bmd->usbdev_handle, LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
 		VR_SET_INPUT_SOURCE, 0x0000, 0, &mode, 1, 1000);
@@ -497,10 +528,11 @@ static void bmd_fujitsu_write(struct blackmagic_device *bmd, uint32_t reg, uint1
 	msg[3] = value >> 8;
 	msg[4] = value;
 
-	if (verbose >= 2) {
+	if (loglevel >= LOG_DEBUG) {
 		uint16_t oldvalue = bmd_fujitsu_read(bmd, reg);
 		if (value != oldvalue)
-			fprintf(stderr, "%s: fujitsu_write @%06x %04x != %04x\n", bmd->name, reg, value, oldvalue);
+			dlog(LOG_DEBUG, "%s: fujitsu_write @%06x %04x != %04x",
+				bmd->name, reg, value, oldvalue);
 	}
 
 	r = libusb_control_transfer(
@@ -544,7 +576,7 @@ static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_prog
 		return 1;
 	}
 
-	if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
+	dlog(LOG_DEBUG, "%s: launching exec program: %s", bmd->name, ep.exec_program);
 
 	if (pipe(pipefd) < 0)
 		return 0;
@@ -581,7 +613,7 @@ static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_prog
 static void bmd_kill_exec_program(struct blackmagic_device *bmd)
 {
 	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
-		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
+		dlog(LOG_DEBUG, "%s: closing output stream", bmd->name);
 		close(bmd->mpegparser.output_fd);
 	}
 	bmd->mpegparser.output_fd = -1;
@@ -601,7 +633,7 @@ static void *bmd_pump_mpegts(void *ctx)
 		if (r != LIBUSB_SUCCESS && r != LIBUSB_ERROR_TIMEOUT)
 			break;
 		if (r == LIBUSB_ERROR_TIMEOUT)
-			fprintf(stderr, "%s: mpeg-ts pump: timeout reading data, retrying!\n", bmd->name);
+			dlog(LOG_INFO, "%s: mpeg-ts pump: timeout reading data, retrying!", bmd->name);
 
 		if (mpegparser_parse(&bmd->mpegparser, actual_length) < 0) {
 			if (ep.exec_program) {
@@ -616,7 +648,7 @@ static void *bmd_pump_mpegts(void *ctx)
 		}
 	} while (running && bmd->running);
 
-	if (verbose) fprintf(stderr, "%s: mpeg-ts pump exiting: %s\n", bmd->name, libusb_error_name(r));
+	dlog(LOG_DEBUG, "%s: mpeg-ts pump exiting: %s", bmd->name, libusb_error_name(r));
 
 	return NULL;
 }
@@ -644,7 +676,7 @@ static int bmd_recognize_device(struct blackmagic_device *bmd)
 	for (i = 0; i < 6; i++)
 		bmd_read_register(bmd, 0x88 + i, &bmd->mac[i]);
 
-	fprintf(stderr, "%s: MAC address %02x:%02x:%02x:%02x:%02x:%02x\n",
+	dlog(LOG_NOTICE, "%s: MAC address %02x:%02x:%02x:%02x:%02x:%02x",
 		bmd->name,
 		bmd->mac[0], bmd->mac[1], bmd->mac[2],
 		bmd->mac[3], bmd->mac[4], bmd->mac[5]);
@@ -913,12 +945,12 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	bmd->encode_sent = 1;
 
 	if (!bmd->current_mode) {
-		if (verbose >= 2)
+		if (loglevel >= LOG_DEBUG)
 			bmd_encoder_dump(bmd);
 		return;
 	}
 
-	if (verbose) fprintf(stderr, "%s: Configuring and starting encoder\n", bmd->name);
+	dlog(LOG_NOTICE, "%s: configuring and starting encoder", bmd->name);
 
 	if (!bmd_configure_encoder(bmd, &ep)) {
 		err = "configuring encoder";
@@ -940,7 +972,7 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	}
 	return;
 error:
-	fprintf(stderr, "%s: failed to %s\n", bmd->name, err);
+	dlog(LOG_ERR, "%s: failed to %s", bmd->name, err);
 }
 
 static void bmd_encoder_stop(struct blackmagic_device *bmd)
@@ -952,7 +984,7 @@ static void bmd_encoder_stop(struct blackmagic_device *bmd)
 	int i, r;
 
 	/* Stop recording */
-	if (verbose) fprintf(stderr, "%s: Stopping encoder\n", bmd->name);
+	dlog(LOG_NOTICE, "%s: stopping encoder", bmd->name);
 	bmd_kill_exec_program(bmd);
 
 	r = libusb_control_transfer(
@@ -979,11 +1011,11 @@ static void bmd_encoder_stop(struct blackmagic_device *bmd)
 
 static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg, int msg_len)
 {
-	int i, dm;
+	int dm;
 
 	switch (msg[0]) {
 	case 0x01: /* Status update */
-		if (verbose) fprintf(stderr, "%s: FX2Status: %s (%d)\n", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
+		dlog(LOG_INFO, "%s: FX2Status: %s (%d)", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
 		bmd->fxstatus = msg[5];
 
 		if (bmd->fxstatus == FX2Status_Idle) {
@@ -1003,11 +1035,11 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 		bmd->current_mode = display_modes[dm];
 
 		if (bmd->current_mode)
-			fprintf(stderr, "%s: Display Mode: %s\n", bmd->name, bmd->current_mode->description);
+			dlog(LOG_NOTICE, "%s: display mode: %s", bmd->name, bmd->current_mode->description);
 		else if (dm == DMODE_invalid)
-			fprintf(stderr, "%s: No Signal\n", bmd->name);
+			dlog(LOG_NOTICE, "%s: no signal", bmd->name);
 		else
-			fprintf(stderr, "%s: Input Mode, 0x%02x (display mode 0x%02x) not supported\n", bmd->name, msg[1], dm);
+			dlog(LOG_NOTICE, "%s: input mode: 0x%02x, display mode: 0x%02x; not supported", bmd->name, msg[1], dm);
 
 		if (!bmd->running)
 			break;
@@ -1017,28 +1049,23 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 
 		if (dm == DMODE_invalid) {
 			if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
-			    ep.input_source >= 0) {
-				fprintf(stderr, "%s: Switching input source to %s (%d)\n",
-					bmd->name, input_source_names[ep.input_source],
-					ep.input_source);
+			    ep.input_source >= 0)
 				bmd_set_input_source(bmd, ep.input_source);
-			}
 		} else {
 			if (bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
 				bmd_encoder_start(bmd);
 		}
 		break;
 	case 0x0d:
-		fprintf(stderr, "%s: H56 Error. Restarting device.\n", bmd->name);
+		dlog(LOG_ERR, "%s: H56 error; restarting device", bmd->name);
 		break;
 	case 0x0e: /* Timestamp update? */
 		break;
 	default:
-		if (verbose) {
-			fprintf(stderr, "%s: Unknown message ", bmd->name);
-			for (i = 0; i < msg_len; i++)
-				fprintf(stderr, " %02x", msg[i]);
-			fprintf(stderr, "\n");
+		if (loglevel >= LOG_DEBUG) {
+			char tmp[512];
+			hexdump(tmp, sizeof(tmp), msg, msg_len);
+			dlog(LOG_DEBUG, "%s: unknown message %s", bmd->name, tmp);
 		}
 		break;
 	}
@@ -1057,11 +1084,10 @@ static void bmd_handle_messages(struct blackmagic_device *bmd, int force)
 			break;
 
 		/* The first 16-bits is the length of the full message */
-		if (verbose) {
-			fprintf(stderr, "%s: EP8: %4d bytes:", bmd->name, actual_length);
-			for (i = 0; i < actual_length; i++)
-				fprintf(stderr, " %02x", bmd->message_buffer[i]);
-			fprintf(stderr, "\n");
+		if (loglevel >= LOG_DEBUG) {
+			char tmp[512];
+			hexdump(tmp, sizeof(tmp), bmd->message_buffer, actual_length);
+			dlog(LOG_DEBUG, "%s: ep8: %4d bytes: %s", bmd->name, actual_length, tmp);
 		}
 
 		for (i = 2; bmd->message_buffer[i] != 0 && i < actual_length;
@@ -1070,7 +1096,7 @@ static void bmd_handle_messages(struct blackmagic_device *bmd, int force)
 	} while ((force && bmd->fxstatus != FX2Status_Idle) || (running && bmd->running));
 
 	if (r != LIBUSB_SUCCESS) {
-		if (verbose) fprintf(stderr, "%s: message reader exiting: %s\n", bmd->name, libusb_error_name(r));
+		dlog(LOG_INFO, "%s: message reader exiting: %s", bmd->name, libusb_error_name(r));
 		bmd->status = r;
 	}
 }
@@ -1092,26 +1118,26 @@ static void *bmd_device_thread(void *ctx)
 
 	r = libusb_open(bmd->usbdev, &bmd->usbdev_handle);
 	if (r != LIBUSB_SUCCESS) {
-		fprintf(stderr, "%s: unable to open device: %s\n", bmd->name, libusb_error_name(r));
+		dlog(LOG_ERR, "%s: unable to open device: %s", bmd->name, libusb_error_name(r));
 		goto exit;
 	}
 
 	r = libusb_set_configuration(bmd->usbdev_handle, 1);
 	if (r != LIBUSB_SUCCESS) {
-		fprintf(stderr, "%s: failed to set configuration: %s\n", bmd->name, libusb_error_name(r));
+		dlog(LOG_ERR, "%s: failed to set configuration: %s", bmd->name, libusb_error_name(r));
 		goto exit;
 	}
 
 	r = libusb_claim_interface(bmd->usbdev_handle, 0);
 	if (r != LIBUSB_SUCCESS) {
-		fprintf(stderr, "%s: failed to claim interface: %s\n", bmd->name, libusb_error_name(r));
+		dlog(LOG_ERR, "%s: failed to claim interface: %s", bmd->name, libusb_error_name(r));
 		goto exit;
 	}
 
 	if (bmd->desc.iManufacturer == 0) {
 		const char *desc = "not available";
 
-		fprintf(stderr, "%s: firmware downloaded needed\n", bmd->name);
+		dlog(LOG_INFO, "%s: firmware downloaded needed", bmd->name);
 		for (i = 0; i < array_size(firmwares); i++) {
 			if (firmwares[i]->device_id != bmd->desc.idProduct)
 				continue;
@@ -1121,15 +1147,11 @@ static void *bmd_device_thread(void *ctx)
 				desc = "failed to download";
 			break;
 		}
-		fprintf(stderr, "%s: firmware %s\n", bmd->name, desc);
+		dlog(LOG_NOTICE, "%s: firmware %s", bmd->name, desc);
 	} else {
 		if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
-		    ep.input_source >= 0) {
-			fprintf(stderr, "%s: Switching input source to %s (%d)\n",
-				bmd->name, input_source_names[ep.input_source],
-				ep.input_source);
+		    ep.input_source >= 0)
 			bmd_set_input_source(bmd, ep.input_source);
-		}
 
 		r = pthread_create(&bmd->mpegts_thread, NULL, bmd_pump_mpegts, bmd);
 		if (r < 0)
@@ -1153,7 +1175,7 @@ static void *bmd_device_thread(void *ctx)
 	}
 
 exit:
-	fprintf(stderr, "%s: closing device\n", bmd->name);
+	dlog(LOG_INFO, "%s: closing device", bmd->name);
 	bmd_kill_exec_program(bmd);
 	libusb_close(bmd->usbdev_handle);
 	libusb_unref_device(bmd->usbdev);
@@ -1183,13 +1205,13 @@ static int handle_hotplug(libusb_context *ctx, libusb_device *dev, libusb_hotplu
 	bmd->usbdev = libusb_ref_device(dev);
 	bmd->status = LIBUSB_SUCCESS;
 
-	fprintf(stderr, "%s: device connected\n", bmd->name);
+	dlog(LOG_INFO, "%s: device connected", bmd->name);
 
 	__sync_add_and_fetch(&num_workers, 1);
 
 	r = pthread_create(&bmd->device_thread, NULL, bmd_device_thread, bmd);
 	if (r != 0) {
-		fprintf(stderr, "%s: failed to create handler thread\n", bmd->name);
+		dlog(LOG_ERR, "%s: failed to create handler thread", bmd->name);
 		libusb_unref_device(bmd->usbdev);
 		free(bmd);
 		return 0;
@@ -1219,6 +1241,7 @@ static int usage(void)
 		"				composite, s-video, or 0-4)\n"
 		"	-x,--execute		Program to execute for each connected stream\n"
 		"	-R,--respawn		Restart execute program if it exits\n"
+		"	-s,--syslog		Log to syslog\n"
 		"\n");
 	return 1;
 }
@@ -1248,9 +1271,10 @@ int main(int argc, char **argv)
 		{ "input-source",	required_argument, NULL, 'S' },
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
+		{ "syslog",		no_argument, NULL, 's' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:x:R";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:x:Rs";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1265,6 +1289,7 @@ int main(int argc, char **argv)
 	optindex = 0;
 	while ((opt=getopt_long(argc, argv, short_options, long_options, &optindex)) > 0) {
 		switch (opt) {
+		case 's': do_syslog = 1; break;
 		case 'x': ep.exec_program = optarg; break;
 		case 'R': ep.respawn = 1; break;
 		case 'f':
@@ -1273,7 +1298,7 @@ int main(int argc, char **argv)
 				return usage();
 			}
 			break;
-		case 'v': verbose++; break;
+		case 'v': loglevel++; break;
 		case 'k': ep.video_kbps = atoi(optarg); break;
 		case 'K': ep.video_max_kbps = atoi(optarg); break;
 		case 'a': ep.audio_kbps = atoi(optarg); break;
@@ -1306,6 +1331,9 @@ int main(int argc, char **argv)
 	firmwares[0] = load_firmware("bmd-atemtvstudio.bin", USB_PID_BMD_ATEM_TV_STUDIO);
 	firmwares[1] = load_firmware("bmd-h264prorecorder.bin", USB_PID_BMD_H264_PRO_RECORDER);
 
+	if (do_syslog)
+		openlog("bmd-tools", 0, LOG_DAEMON);
+
 	r = libusb_init(&ctx);
 	if (r != LIBUSB_SUCCESS) {
 		msg = "initialize usb library", ec = 1;
@@ -1330,7 +1358,7 @@ int main(int argc, char **argv)
 
 error:
 	if (msg)
-		fprintf(stderr, "Failed to %s: %s\n", msg, libusb_error_name(r));
+		dlog(LOG_ERR, "failed to %s: %s", msg, libusb_error_name(r));
 	if (ctx)
 		libusb_exit(ctx);
 	return ec;
