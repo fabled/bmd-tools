@@ -6,7 +6,6 @@
  * Getting technical datasheet to that chip would make things a lot clearer.
  */
 
-#define _GNU_SOURCE
 #include <math.h>
 #include <errno.h>
 #include <spawn.h>
@@ -840,6 +839,62 @@ static void bmd_encoder_dump(struct blackmagic_device *bmd)
 		);
 }
 
+static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
+{
+	char tmp[1024];
+	char *envp[16];
+	char *argv[] = { exec_program, 0 };
+	int r, i, p, pipefd[2];
+	posix_spawn_file_actions_t fa;
+
+	if (!exec_program) {
+		bmd->mpegparser.output_fd = STDOUT_FILENO;
+		return 1;
+	}
+
+	if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
+
+	if (pipe(pipefd) < 0)
+		return 0;
+
+	i = p = 0;
+	if (bmd->desc.idProduct != USB_PID_BMD_H264_PRO_RECORDER) {
+		envp[i++] = &tmp[p];
+		p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_MAC=%02x%02x%02x%02x%02x%02x",
+			bmd->mac[0], bmd->mac[1], bmd->mac[2], bmd->mac[3], bmd->mac[4], bmd->mac[5]) + 1;
+	}
+	envp[i++] = &tmp[p];
+	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_WIDTH=%d", bmd->current_mode->width) + 1;
+	envp[i++] = &tmp[p];
+	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_HEIGHT=%d", bmd->current_mode->height) + 1;
+	envp[i] = 0;
+
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_adddup2(&fa, pipefd[0], STDIN_FILENO);
+	posix_spawn_file_actions_addclose(&fa, pipefd[1]);
+	r = posix_spawnp(NULL, argv[0], &fa, NULL, argv, envp);
+	posix_spawn_file_actions_destroy(&fa);
+
+	close(pipefd[0]);
+	if (r != 0) {
+		close(pipefd[1]);
+		return 0;
+	}
+
+	bmd->mpegparser.output_fd = pipefd[1];
+	fcntl(pipefd[1], F_SETFL, O_NONBLOCK);
+	return 1;
+}
+
+static void bmd_kill_exec_program(struct blackmagic_device *bmd)
+{
+	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
+		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
+		close(bmd->mpegparser.output_fd);
+	}
+	bmd->mpegparser.output_fd = -1;
+}
+
 static void bmd_encoder_start(struct blackmagic_device *bmd)
 {
 	const char *err;
@@ -864,34 +919,9 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 		goto error;
 	}
 
-	if (ep.exec_program) {
-		char *argv[] = { ep.exec_program, 0 };
-		int pipefd[2];
-		posix_spawn_file_actions_t fa;
-
-		if (verbose) fprintf(stderr, "%s: Launching exec program: %s\n", bmd->name, ep.exec_program);
-
-		if (pipe(pipefd) < 0) {
-			err = "create pipe for child process";
-			goto error;
-		}
-
-		posix_spawn_file_actions_init(&fa);
-		posix_spawn_file_actions_adddup2(&fa, pipefd[0], STDIN_FILENO);
-		posix_spawn_file_actions_addclose(&fa, pipefd[1]);
-		r = posix_spawnp(NULL, argv[0], &fa, NULL, argv, environ);
-		posix_spawn_file_actions_destroy(&fa);
-
-		close(pipefd[0]);
-		if (r != 0) {
-			close(pipefd[1]);
-			err = "launch exec program";
-			goto error;
-		}
-
-		bmd->mpegparser.output_fd = pipefd[1];
-	} else {
-		bmd->mpegparser.output_fd = STDOUT_FILENO;
+	if (!bmd_start_exec_program(bmd, ep.exec_program)) {
+		err = "start exec program";
+		goto error;
 	}
 
 	r = libusb_control_transfer(
@@ -905,15 +935,6 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	return;
 error:
 	fprintf(stderr, "%s: failed to %s\n", bmd->name, err);
-}
-
-static void bmd_kill_exec_program(struct blackmagic_device *bmd)
-{
-	if (ep.exec_program && bmd->mpegparser.output_fd >= 0) {
-		if (verbose) fprintf(stderr, "%s: closing output stream\n", bmd->name);
-		close(bmd->mpegparser.output_fd);
-	}
-	bmd->mpegparser.output_fd = -1;
 }
 
 static void bmd_encoder_stop(struct blackmagic_device *bmd)
@@ -1294,8 +1315,6 @@ int main(int argc, char **argv)
 		msg = "register callback", ec = 1;
 		goto error;
 	}
-
-	fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK);
 
 	while (running || num_workers)
 		libusb_handle_events(ctx);
