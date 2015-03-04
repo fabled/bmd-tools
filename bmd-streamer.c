@@ -1239,7 +1239,8 @@ static int usage(void)
 		"	-F,--fps-divider	Set framerate divider (input / stream)\n"
 		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
 		"				composite, s-video, or 0-4)\n"
-		"	-x,--execute		Program to execute for each connected stream\n"
+		"	-f,--firmware-dir	Directory for firmare images\n"
+		"	-x,--exec		Program to execute for each connected stream\n"
 		"	-R,--respawn		Restart execute program if it exits\n"
 		"	-s,--syslog		Log to syslog\n"
 		"\n");
@@ -1268,6 +1269,7 @@ int main(int argc, char **argv)
 		{ "h264-cabac",		no_argument, NULL, 'c' },
 		{ "h264-no-cabac",	no_argument, NULL, 'C' },
 		{ "fps-divider",	required_argument, NULL, 'F' },
+		{ "firmware-dir",	required_argument, NULL, 'f' },
 		{ "input-source",	required_argument, NULL, 'S' },
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
