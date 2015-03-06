@@ -392,31 +392,49 @@ struct mpeg_parser_buffer {
 
 static int mpegparser_parse(struct mpeg_parser_buffer *pb, int newlen)
 {
+	struct iovec iov[64];
 	unsigned char *buf = &pb->data[-pb->oldlen];
-	int i = 0, len = newlen + pb->oldlen, r = 0;
+	int i = 0, len = newlen + pb->oldlen, r = 0, ioc = 0, nomerge = 1;
 
 	while (i + 0xbc <= len) {
-		if (memcmp(&buf[i], "\x00\x00\x00\x00", 4) == 0) {
-			i += 0xbc;
-			continue;
-		}
+		if (memcmp(&buf[i], "\x00\x00\x00\x00", 4) == 0) goto skip_block;
 		if (buf[i] != 0x47) {
 			while (buf[i] != 0x47 && i < len)
 				i++;
-			continue;
+			goto skip;
 		}
-		if (buf[i+1] == 0x1f && buf[i+2] == 0xff) {
+		if (buf[i+1] == 0x1f && buf[i+2] == 0xff) goto skip_block;
+		if (pb->output_fd < 0 || r) {
+		skip_block:
 			i += 0xbc;
+		skip:
+			nomerge = 1;
 			continue;
 		}
-		if (pb->output_fd >= 0 && r == 0) {
-			if (write(pb->output_fd, &buf[i], 0xbc) < 0) {
-				dlog(LOG_NOTICE, "error writing MPEG TS: %s",
-					strerror(errno));
-				if (errno == EPIPE) r = -1;
+
+		if (nomerge) {
+			nomerge = 0;
+			iov[ioc].iov_base = &buf[i];
+			iov[ioc].iov_len = 0xbc;
+			if (++ioc >= array_size(iov)) {
+				if (writev(pb->output_fd, iov, ioc) < 0) {
+					dlog(LOG_NOTICE, "error writing MPEG TS: %s",
+						strerror(errno));
+					if (errno == EPIPE) r = -1;
+				}
+				ioc = 0;
+				nomerge = 1;
 			}
+		} else {
+			iov[ioc-1].iov_len += 0xbc;
 		}
 		i += 0xbc;
+	}
+
+	if (ioc && writev(pb->output_fd, iov, ioc) < 0) {
+		dlog(LOG_NOTICE, "error writing MPEG TS: %s",
+			strerror(errno));
+		if (errno == EPIPE) r = -1;
 	}
 
 	pb->oldlen = len - i;
