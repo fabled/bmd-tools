@@ -1294,7 +1294,7 @@ int main(int argc, char **argv)
 		{ "syslog",		no_argument, NULL, 's' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:S:x:Rs";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
