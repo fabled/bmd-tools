@@ -448,8 +448,9 @@ struct blackmagic_device {
 	volatile int running;
 	int status;
 	int fxstatus;
-	int recognized;
-	int encode_sent;
+	int recognized : 1;
+	int encode_sent : 1;
+	int display_mode_changed : 1;
 
 	int current_display_mode;
 	struct display_mode *current_mode;
@@ -957,7 +958,7 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 	uint8_t status;
 	int r;
 
-	if (bmd->current_display_mode == DMODE_invalid)
+	if (bmd->encode_sent || bmd->current_display_mode == DMODE_invalid)
 		return;
 
 	bmd->encode_sent = 1;
@@ -1033,45 +1034,16 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 
 	switch (msg[0]) {
 	case 0x01: /* Status update */
-		dlog(LOG_INFO, "%s: FX2Status: %s (%d)", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
+		dlog(LOG_DEBUG, "%s: FX2Status: %s (%d)", bmd->name, FX2Status_to_String(msg[5]), msg[5]);
 		bmd->fxstatus = msg[5];
-
-		if (bmd->fxstatus == FX2Status_Idle) {
-			bmd->encode_sent = 0;
-			if (!bmd->recognized)
-				bmd_recognize_device(bmd);
-			if (bmd->running && !bmd->encode_sent)
-				bmd_encoder_start(bmd);
-		} else if (bmd->fxstatus == FX2Status_Encoding) {
-			if (!bmd->encode_sent)
-				bmd_encoder_stop(bmd);
-		}
 		break;
 	case 0x05: /* Input connector */
 		dm = input_mode_to_display_mode(msg[1]);
-		bmd->current_display_mode = dm;
-		bmd->current_mode = display_modes[dm];
-
-		if (bmd->current_mode)
-			dlog(LOG_NOTICE, "%s: display mode: %s", bmd->name, bmd->current_mode->description);
-		else if (dm == DMODE_invalid)
-			dlog(LOG_NOTICE, "%s: no signal", bmd->name);
-		else
-			dlog(LOG_NOTICE, "%s: input mode: 0x%02x, display mode: 0x%02x; not supported", bmd->name, msg[1], dm);
-
-		if (!bmd->running)
-			break;
-
-		if (bmd->encode_sent)
-			bmd_encoder_stop(bmd);
-
-		if (dm == DMODE_invalid) {
-			if (bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
-			    ep.input_source >= 0)
-				bmd_set_input_source(bmd, ep.input_source);
-		} else {
-			if (bmd->fxstatus == FX2Status_Idle && !bmd->encode_sent)
-				bmd_encoder_start(bmd);
+		dlog(LOG_DEBUG, "%s: DisplayMode: %02x", bmd->name, dm);
+		if (dm != bmd->current_display_mode) {
+			bmd->current_display_mode = dm;
+			bmd->current_mode = display_modes[dm];
+			bmd->display_mode_changed = 1;
 		}
 		break;
 	case 0x0d:
@@ -1108,9 +1080,43 @@ static void bmd_handle_messages(struct blackmagic_device *bmd, int force)
 			dlog(LOG_DEBUG, "%s: ep8: %4d bytes: %s", bmd->name, actual_length, tmp);
 		}
 
+		/* Parse queued messages, especially during boot/first connect
+		 * there can be lot of them, so process them allf irst. */
 		for (i = 2; bmd->message_buffer[i] != 0 && i < actual_length;
 		     i += bmd->message_buffer[i] + 1)
 			bmd_parse_message(bmd, &bmd->message_buffer[i+1], bmd->message_buffer[i]);
+
+		/* Act on status changes */
+		switch (bmd->fxstatus) {
+		case FX2Status_Idle:
+			bmd->encode_sent = 0;
+			if (!bmd->running)
+				break;
+
+			if (!bmd->recognized)
+				bmd_recognize_device(bmd);
+
+			if (bmd->current_mode)
+				dlog(LOG_NOTICE, "%s: display mode: %s", bmd->name, bmd->current_mode->description);
+			else if (bmd->current_display_mode == DMODE_invalid)
+				dlog(LOG_NOTICE, "%s: no signal", bmd->name);
+			else
+				dlog(LOG_ERR, "%s: display mode: 0x%02x; not supported", bmd->name, bmd->current_display_mode);
+
+			if (bmd->current_display_mode != DMODE_invalid)
+				bmd_encoder_start(bmd);
+			else if (bmd->display_mode_changed &&
+				 bmd->desc.idProduct == USB_PID_BMD_H264_PRO_RECORDER &&
+				 ep.input_source >= 0)
+				bmd_set_input_source(bmd, ep.input_source);
+			break;
+		case FX2Status_Encoding:
+			if (bmd->display_mode_changed || !bmd->encode_sent)
+				bmd_encoder_stop(bmd);
+			break;
+		}
+		bmd->display_mode_changed = 0;
+
 	} while ((force && bmd->fxstatus != FX2Status_Idle) || (running && bmd->running));
 
 	if (r != LIBUSB_SUCCESS) {
