@@ -43,6 +43,7 @@ struct encoding_parameters {
 	int8_t		input_source;
 	char *		exec_program;
 	int		respawn : 1;
+	int		native_mode : 1;
 };
 
 static int do_syslog = 0;
@@ -61,6 +62,7 @@ static struct encoding_parameters ep = {
 	.audio_khz = 48000,
 	.fps_divider = 1,
 	.input_source = -1,
+	.native_mode = 0,
 };
 
 static const char *input_source_names[5] = {
@@ -108,6 +110,7 @@ struct display_mode {
 	uint16_t	r1000, r1404, r140a, r1430_l;
 	uint16_t	r147x[4];
 	uint16_t	r154x[11];
+	struct display_mode	*native_mode;
 };
 
 static struct display_mode *display_modes[DMODE_MAX] = {
@@ -170,12 +173,21 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_1920x1080i_25] = &(struct display_mode){
 		.description = "1080i 50",
-		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
+		.width = 1920, .height = 1080, .interlaced = 0, .convert_to_1088 = 0,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.ain_offset = 0x0000,
 		.r1000 = 0x0200, .r1404 = 0x0041, .r140a = 0x1701, .r1430_l = 0xff,
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0000, 0x0034, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0780, 0x0438, 0x0000 },
+		.native_mode = &(struct display_mode){
+			.description = "1080i 50",
+			.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 0,
+			.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
+			.ain_offset = 0x0000,
+			.r1000 = 0x0200, .r1404 = 0x0071, .r140a = 0x1001, .r1430_l = 0x02,
+			.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+			.r154x = { 0x0100, 0x0001, 0x07ff, 0x0a50, 0x0465, 0x02d0, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0000 },
+		}
 	},
 	[DMODE_1920x1080i_29_97] = &(struct display_mode){
 		.description = "1080i 29.97",
@@ -1043,6 +1055,8 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 		if (dm != bmd->current_display_mode) {
 			bmd->current_display_mode = dm;
 			bmd->current_mode = display_modes[dm];
+			if(ep.native_mode && bmd->current_mode->native_mode)
+				bmd->current_mode = bmd->current_mode->native_mode;
 			bmd->display_mode_changed = 1;
 		}
 		break;
@@ -1298,9 +1312,10 @@ int main(int argc, char **argv)
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ "syslog",		no_argument, NULL, 's' },
+		{ "native",		no_argument, NULL, 'n' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rsn";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1346,6 +1361,7 @@ int main(int argc, char **argv)
 			if (i >= array_size(input_source_names)) i = -1;
 			ep.input_source = i;
 			break;
+		case 'n': ep.native_mode = 1; break;
 		default:
 			return usage();
 		}
