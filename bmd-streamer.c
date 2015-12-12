@@ -43,6 +43,8 @@ struct encoding_parameters {
 	int8_t		input_source;
 	char *		exec_program;
 	int		respawn : 1;
+	int		native_mode : 1;
+	int		src_x, src_y, src_width, src_height, dst_width, dst_height;
 };
 
 static int do_syslog = 0;
@@ -61,6 +63,13 @@ static struct encoding_parameters ep = {
 	.audio_khz = 48000,
 	.fps_divider = 1,
 	.input_source = -1,
+	.native_mode = 0,
+	.src_x = 0,
+	.src_y = 0,
+	.src_width = 0,
+	.src_height = 0,
+	.dst_width = 0,
+	.dst_height = 0,
 };
 
 static const char *input_source_names[5] = {
@@ -108,6 +117,7 @@ struct display_mode {
 	uint16_t	r1000, r1404, r140a, r1430_l;
 	uint16_t	r147x[4];
 	uint16_t	r154x[11];
+	struct display_mode	*native_mode;
 };
 
 static struct display_mode *display_modes[DMODE_MAX] = {
@@ -122,12 +132,21 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_720x576i_25] = &(struct display_mode){
 		.description = "576i 25",
-		.width = 720, .height = 576, .interlaced = 1, .program_fpga = 1,
+		.width = 720, .height = 576, .interlaced = 0, .program_fpga = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.audio_delay = 0x30, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x1050, 0x0000, 0x07ff, 0x0360, 0x0271, 0x0090, 0x002e, 0x07ff, 0x02d0, 0x0240, 0x0019 },
+		.native_mode = &(struct display_mode){
+			.description = "576i 25",
+			.width = 720, .height = 576, .interlaced = 1, .program_fpga = 0,
+			.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
+			.audio_delay = 0x30, .ain_offset = 0x0000,
+			.r1000 = 0x0100, .r1404 = 0x0071, .r140a = 0x1005, .r1430_l = 0x00,
+			.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+			.r154x = { 0x0100, 0x0001, 0x07ff, 0x06c0, 0x0271, 0x0120, 0x0017, 0x07ff, 0x05a0, 0x0120, 0x0000 },
+		},
 	},
 	/* DMODE_720x480p_59_94 */
 	/* DMODE_720x576p_50 */
@@ -170,12 +189,21 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 	},
 	[DMODE_1920x1080i_25] = &(struct display_mode){
 		.description = "1080i 50",
-		.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 1,
+		.width = 1920, .height = 1080, .interlaced = 0, .convert_to_1088 = 1,
 		.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
 		.ain_offset = 0x0000,
 		.r1000 = 0x0200, .r1404 = 0x0041, .r140a = 0x1701, .r1430_l = 0xff,
 		.r147x = { 0x26, 0x7d, 0x56, 0x07 },
 		.r154x = { 0x0000, 0x0034, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x000e, 0x0780, 0x0438, 0x0000 },
+		.native_mode = &(struct display_mode){
+			.description = "1080i 50",
+			.width = 1920, .height = 1080, .interlaced = 1, .convert_to_1088 = 0,
+			.fps_numerator = 25, .fps_denominator = 1, .fx2_fps = 0x3,
+			.ain_offset = 0x0000,
+			.r1000 = 0x0200, .r1404 = 0x0071, .r140a = 0x1001, .r1430_l = 0x02,
+			.r147x = { 0x26, 0x7d, 0x56, 0x07 },
+			.r154x = { 0x0100, 0x0001, 0x07ff, 0x0a50, 0x0465, 0x02d0, 0x0015, 0x07ff, 0x0780, 0x0438, 0x0000 },
+		}
 	},
 	[DMODE_1920x1080i_29_97] = &(struct display_mode){
 		.description = "1080i 29.97",
@@ -851,18 +879,17 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	}
 
 	/* Group 5 - Scaler / H.264 encoder */
-	if (0 /*target_mode*/) {
+	if (ep->src_x || ep->src_y || ep->src_width || ep->src_height || ep->dst_width || ep->dst_height) {
 		// bit 0x8000 resolution converter enabled
 		// bit 0x00ff conversion target, 0=no conversion, 4=NTSC, 5=PAL, 0xff=progressive
+
 		bmd_fujitsu_write(bmd, 0x001520, 0x80ff);
-		/*
-		bmd_fujitsu_write(bmd, 0x001522, ep->mode->src_xoffs);	// src x offset
-		bmd_fujitsu_write(bmd, 0x001524, ep->mode->src_yoffs);	// src y offset
-		bmd_fujitsu_write(bmd, 0x001526, ep->mode->src_width);	// src width
-		bmd_fujitsu_write(bmd, 0x001528, ep->mode->src_height);// src height (1080)
-		bmd_fujitsu_write(bmd, 0x00152e, ep->mode->dst_width);	// dst width
-		bmd_fujitsu_write(bmd, 0x001530, ep->mode->dst_height);// dst height (1088)
-		*/
+		bmd_fujitsu_write(bmd, 0x001522, ep->src_x);	// src x offset
+		bmd_fujitsu_write(bmd, 0x001524, ep->src_y);	// src y offset
+		bmd_fujitsu_write(bmd, 0x001526, ep->src_width?ep->src_width:current_mode->width);	// src width
+		bmd_fujitsu_write(bmd, 0x001528, ep->src_height?ep->src_height:current_mode->height);// src height (1080)
+		bmd_fujitsu_write(bmd, 0x00152e, ep->dst_width?ep->dst_width:current_mode->width);	// dst width
+		bmd_fujitsu_write(bmd, 0x001530, ep->dst_height?ep->dst_height:current_mode->height);// dst height (1088)
 	} else if (current_mode->convert_to_1088) {
 		/* Convert to height 1088 */
 		bmd_fujitsu_write(bmd, 0x001520, 0x80ff);
@@ -882,8 +909,8 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 		bmd_fujitsu_write(bmd, 0x001530, 0);	// dst height
 	}
 	bmd_fujitsu_write(bmd, 0x0015a0, (ep->h264_profile << 14) | ep->h264_level);
-	bmd_fujitsu_write(bmd, 0x0015a2, (current_mode->width + 15) >> 4);
-	bmd_fujitsu_write(bmd, 0x0015a4, (current_mode->height + 15) >> 4);
+	bmd_fujitsu_write(bmd, 0x0015a2, ((ep->dst_width?ep->dst_width:current_mode->width) + 15) >> 4);
+	bmd_fujitsu_write(bmd, 0x0015a4, ((ep->dst_height?ep->dst_height:current_mode->height) + 15) >> 4);
 	bmd_fujitsu_write(bmd, 0x0015a6, current_mode->fps_denominator); // divider
 	bmd_fujitsu_write(bmd, 0x0015a8, 2*current_mode->fps_numerator/ep->fps_divider >> 16);
 	bmd_fujitsu_write(bmd, 0x0015aa, 2*current_mode->fps_numerator/ep->fps_divider & 0xffff);
@@ -1043,6 +1070,8 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 		if (dm != bmd->current_display_mode) {
 			bmd->current_display_mode = dm;
 			bmd->current_mode = display_modes[dm];
+			if(ep.native_mode && bmd->current_mode->native_mode)
+				bmd->current_mode = bmd->current_mode->native_mode;
 			bmd->display_mode_changed = 1;
 		}
 		break;
@@ -1298,9 +1327,16 @@ int main(int argc, char **argv)
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ "syslog",		no_argument, NULL, 's' },
+		{ "native",		no_argument, NULL, 'n' },
+		{ "src-x",		required_argument, NULL, '0' },
+		{ "src-y",		required_argument, NULL, '1' },
+		{ "src-width",		required_argument, NULL, '2' },
+		{ "src-height",		required_argument, NULL, '3' },
+		{ "dst-width",		required_argument, NULL, '4' },
+		{ "dst-height",		required_argument, NULL, '5' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rsn";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1346,6 +1382,13 @@ int main(int argc, char **argv)
 			if (i >= array_size(input_source_names)) i = -1;
 			ep.input_source = i;
 			break;
+		case 'n': ep.native_mode = 1; break;
+		case '0': ep.src_x = atoi(optarg); break;
+		case '1': ep.src_y = atoi(optarg); break;
+		case '2': ep.src_width = atoi(optarg); break;
+		case '3': ep.src_height = atoi(optarg); break;
+		case '4': ep.dst_width = atoi(optarg); break;
+		case '5': ep.dst_height = atoi(optarg); break;
 		default:
 			return usage();
 		}
