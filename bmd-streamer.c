@@ -43,6 +43,7 @@ struct encoding_parameters {
 	int8_t		input_source;
 	char *		exec_program;
 	int		respawn : 1;
+	int		native_mode : 1;
 };
 
 static int do_syslog = 0;
@@ -61,6 +62,7 @@ static struct encoding_parameters ep = {
 	.audio_khz = 48000,
 	.fps_divider = 1,
 	.input_source = -1,
+	.native_mode = 0,
 };
 
 static const char *input_source_names[5] = {
@@ -108,6 +110,7 @@ struct display_mode {
 	uint16_t	r1000, r1404, r140a, r1430_l;
 	uint16_t	r147x[4];
 	uint16_t	r154x[11];
+	struct display_mode	*native_mode;
 };
 
 static struct display_mode *display_modes[DMODE_MAX] = {
@@ -1043,6 +1046,8 @@ static void bmd_parse_message(struct blackmagic_device *bmd, const uint8_t *msg,
 		if (dm != bmd->current_display_mode) {
 			bmd->current_display_mode = dm;
 			bmd->current_mode = display_modes[dm];
+			if(ep.native_mode && bmd->current_mode->native_mode)
+				bmd->current_mode = bmd->current_mode->native_mode;
 			bmd->display_mode_changed = 1;
 		}
 		break;
@@ -1298,9 +1303,10 @@ int main(int argc, char **argv)
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ "syslog",		no_argument, NULL, 's' },
+		{ "native",		no_argument, NULL, 'n' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rsn";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1346,6 +1352,7 @@ int main(int argc, char **argv)
 			if (i >= array_size(input_source_names)) i = -1;
 			ep.input_source = i;
 			break;
+		case 'n': ep.native_mode = 1; break;
 		default:
 			return usage();
 		}
