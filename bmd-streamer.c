@@ -229,7 +229,7 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.description = "720p 50",
 		.width = 1280, .height = 720, .interlaced = 0,
 		.fps_numerator = 50, .fps_denominator = 1, .fx2_fps = 0x6,
-		.audio_delay = 0x05, .ain_offset = 0x0384,
+		.audio_delay = 0x05, .ain_offset = 0x0000,
 		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
 		.r147x = { 0x10, 0x70, 0x70, 0x10 },
 		.r154x = { 0x0000, 0x0001, 0x07ff, 0x07bb, 0x02ee, 0x0107, 0x001a, 0x07ff, 0x0500, 0x02d0, 0x0032 },
