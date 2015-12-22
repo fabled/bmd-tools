@@ -9,6 +9,7 @@
 #include <math.h>
 #include <errno.h>
 #include <spawn.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -20,9 +21,10 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
-#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
 
 #include <libusb.h>
 
