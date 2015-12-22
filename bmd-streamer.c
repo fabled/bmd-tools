@@ -43,6 +43,7 @@ struct encoding_parameters {
 	int8_t		input_source;
 	char *		exec_program;
 	int		respawn : 1;
+	int		src_x, src_y, src_width, src_height, dst_width, dst_height;
 };
 
 static int do_syslog = 0;
@@ -851,18 +852,17 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 	}
 
 	/* Group 5 - Scaler / H.264 encoder */
-	if (0 /*target_mode*/) {
+	if (ep->src_x || ep->src_y || ep->src_width || ep->src_height || ep->dst_width || ep->dst_height) {
 		// bit 0x8000 resolution converter enabled
 		// bit 0x00ff conversion target, 0=no conversion, 4=NTSC, 5=PAL, 0xff=progressive
+
 		bmd_fujitsu_write(bmd, 0x001520, 0x80ff);
-		/*
-		bmd_fujitsu_write(bmd, 0x001522, ep->mode->src_xoffs);	// src x offset
-		bmd_fujitsu_write(bmd, 0x001524, ep->mode->src_yoffs);	// src y offset
-		bmd_fujitsu_write(bmd, 0x001526, ep->mode->src_width);	// src width
-		bmd_fujitsu_write(bmd, 0x001528, ep->mode->src_height);// src height (1080)
-		bmd_fujitsu_write(bmd, 0x00152e, ep->mode->dst_width);	// dst width
-		bmd_fujitsu_write(bmd, 0x001530, ep->mode->dst_height);// dst height (1088)
-		*/
+		bmd_fujitsu_write(bmd, 0x001522, ep->src_x);	// src x offset
+		bmd_fujitsu_write(bmd, 0x001524, ep->src_y);	// src y offset
+		bmd_fujitsu_write(bmd, 0x001526, ep->src_width?ep->src_width:current_mode->width);	// src width
+		bmd_fujitsu_write(bmd, 0x001528, ep->src_height?ep->src_height:current_mode->height);// src height (1080)
+		bmd_fujitsu_write(bmd, 0x00152e, ep->dst_width?ep->dst_width:current_mode->width);	// dst width
+		bmd_fujitsu_write(bmd, 0x001530, ep->dst_height?ep->dst_height:current_mode->height);// dst height (1088)
 	} else if (current_mode->convert_to_1088) {
 		/* Convert to height 1088 */
 		bmd_fujitsu_write(bmd, 0x001520, 0x80ff);
@@ -882,8 +882,8 @@ static int bmd_configure_encoder(struct blackmagic_device *bmd, struct encoding_
 		bmd_fujitsu_write(bmd, 0x001530, 0);	// dst height
 	}
 	bmd_fujitsu_write(bmd, 0x0015a0, (ep->h264_profile << 14) | ep->h264_level);
-	bmd_fujitsu_write(bmd, 0x0015a2, (current_mode->width + 15) >> 4);
-	bmd_fujitsu_write(bmd, 0x0015a4, (current_mode->height + 15) >> 4);
+	bmd_fujitsu_write(bmd, 0x0015a2, ((ep->dst_width?ep->dst_width:current_mode->width) + 15) >> 4);
+	bmd_fujitsu_write(bmd, 0x0015a4, ((ep->dst_height?ep->dst_height:current_mode->height) + 15) >> 4);
 	bmd_fujitsu_write(bmd, 0x0015a6, current_mode->fps_denominator); // divider
 	bmd_fujitsu_write(bmd, 0x0015a8, 2*current_mode->fps_numerator/ep->fps_divider >> 16);
 	bmd_fujitsu_write(bmd, 0x0015aa, 2*current_mode->fps_numerator/ep->fps_divider & 0xffff);
@@ -1298,6 +1298,12 @@ int main(int argc, char **argv)
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ "syslog",		no_argument, NULL, 's' },
+		{ "src-x",		required_argument, NULL, '0' },
+		{ "src-y",		required_argument, NULL, '1' },
+		{ "src-width",		required_argument, NULL, '2' },
+		{ "src-height",		required_argument, NULL, '3' },
+		{ "dst-width",		required_argument, NULL, '4' },
+		{ "dst-height",		required_argument, NULL, '5' },
 		{ NULL }
 	};
 	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
@@ -1346,6 +1352,12 @@ int main(int argc, char **argv)
 			if (i >= array_size(input_source_names)) i = -1;
 			ep.input_source = i;
 			break;
+		case '0': ep.src_x = atoi(optarg); break;
+		case '1': ep.src_y = atoi(optarg); break;
+		case '2': ep.src_width = atoi(optarg); break;
+		case '3': ep.src_height = atoi(optarg); break;
+		case '4': ep.dst_width = atoi(optarg); break;
+		case '5': ep.dst_height = atoi(optarg); break;
 		default:
 			return usage();
 		}
