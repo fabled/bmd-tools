@@ -585,8 +585,23 @@ static int bmd_upload_firmware(struct blackmagic_device *bmd, struct firmware *f
 	return bmd->status == LIBUSB_SUCCESS;
 }
 
+static const char *format_usb_ports(const uint8_t *ports, size_t n, char *fmt)
+{
+	int i = 0, p = 0;
+	if (n == 0) {
+		fmt[0] = 0;
+		return fmt;
+	}
+	p += sprintf(fmt, "%u", ports[0]);
+	for (i = 1; i < n; i++)
+		p += sprintf(&fmt[p], ".%u", ports[i]);
+	return fmt;
+}
+
 static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
 {
+	uint8_t ports[8];
+	char fmt[array_size(ports)*4];
 	char tmp[1024];
 	char *envp[16];
 	char *argv[] = { exec_program, 0 };
@@ -613,6 +628,9 @@ static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_prog
 	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_WIDTH=%d", bmd->current_mode->width) + 1;
 	envp[i++] = &tmp[p];
 	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_STREAM_HEIGHT=%d", bmd->current_mode->height) + 1;
+	envp[i++] = &tmp[p];
+	r = libusb_get_port_numbers(bmd->usbdev, ports, array_size(ports));
+	p += snprintf(&tmp[p], sizeof(tmp)-p, "BMD_USB_PORTS=%s", format_usb_ports(ports, r, fmt)) + 1;
 	envp[i] = 0;
 
 	posix_spawn_file_actions_init(&fa);
