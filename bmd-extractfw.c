@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -65,7 +66,8 @@ int main(int argc, char **argv)
 			continue;
 
 		fwend = (uint8_t*)h + 5;
-		fprintf(stderr, "%s: @%08x, %d bytes\n", specs[i].filename, fwbase - data, fwend - fwbase);
+		fprintf(stderr, "%s: @%08x, %ud bytes\n", specs[i].filename,
+			(unsigned int)(fwbase - data), (unsigned int)(fwend - fwbase));
 
 		fd = creat(specs[i].filename, 0666);
 		if (fd < 0) {
