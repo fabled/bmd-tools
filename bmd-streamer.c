@@ -6,6 +6,7 @@
  * Getting technical datasheet to that chip would make things a lot clearer.
  */
 
+#define _GNU_SOURCE
 #include <math.h>
 #include <errno.h>
 #include <spawn.h>
@@ -615,7 +616,7 @@ static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_prog
 
 	dlog(LOG_DEBUG, "%s: launching exec program: %s", bmd->name, ep.exec_program);
 
-	if (pipe(pipefd) < 0)
+	if (pipe2(pipefd, O_CLOEXEC) < 0)
 		return 0;
 
 	i = p = 0;
@@ -1345,7 +1346,7 @@ int main(int argc, char **argv)
 		case 'x': ep.exec_program = optarg; break;
 		case 'R': ep.respawn = 1; break;
 		case 'f':
-			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY)) < 0) {
+			if ((firmware_fd = open(optarg, O_DIRECTORY|O_RDONLY|O_CLOEXEC)) < 0) {
 				perror("open");
 				return usage();
 			}
