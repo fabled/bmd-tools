@@ -599,6 +599,30 @@ static const char *format_usb_ports(const uint8_t *ports, size_t n, char *fmt)
 	return fmt;
 }
 
+#ifdef __APPLE__
+static int pipe2(int pipefd[2], int flags)
+{
+	if (flags & ~O_CLOEXEC) { /* not implemented in this simple wrapper */
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (pipe(pipefd) < 0)
+		return -1;
+
+	if (flags & O_CLOEXEC)
+	{
+		if (fcntl(pipefd[0], F_SETFD, FD_CLOEXEC) < 0 ||
+		    fcntl(pipefd[1], F_SETFD, FD_CLOEXEC) < 0) {
+			close(pipefd[0]);
+			close(pipefd[1]);
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
 static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
 {
 	uint8_t ports[8];
@@ -1284,7 +1308,7 @@ static int usage(void)
 		"	-F,--fps-divider	Set framerate divider (input / stream)\n"
 		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
 		"				composite, s-video, or 0-4)\n"
-		"	-f,--firmware-dir	Directory for firmare images\n"
+		"	-f,--firmware-dir	Directory for firmware images\n"
 		"	-x,--exec		Program to execute for each connected stream\n"
 		"	-R,--respawn		Restart execute program if it exits\n"
 		"	-s,--syslog		Log to syslog\n"
@@ -1389,6 +1413,11 @@ int main(int argc, char **argv)
 
 	firmwares[0] = load_firmware("bmd-atemtvstudio.bin", USB_PID_BMD_ATEM_TV_STUDIO);
 	firmwares[1] = load_firmware("bmd-h264prorecorder.bin", USB_PID_BMD_H264_PRO_RECORDER);
+
+	if (!firmwares[0] || !firmwares[1]) {
+		msg = "load firmware", ec = 1;
+		goto error;
+	}
 
 	if (do_syslog)
 		openlog("bmd-tools", 0, LOG_DAEMON);
