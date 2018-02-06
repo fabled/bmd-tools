@@ -134,7 +134,15 @@ static struct display_mode *display_modes[DMODE_MAX] = {
 		.r154x = { 0x1050, 0x0000, 0x07ff, 0x0360, 0x0271, 0x0090, 0x002e, 0x07ff, 0x02d0, 0x0240, 0x0019 },
 	},
 	/* DMODE_720x480p_59_94 */
-	/* DMODE_720x576p_50 */
+	[DMODE_720x576p_50] = &(struct display_mode){
+		.description = "576p 50",
+		.width = 720, .height = 576,
+		.fps_numerator = 50, .fps_denominator = 1, .fx2_fps = 0x6,
+		.ain_offset = 0x0000,
+		.r1000 = 0x0500, .r1404 = 0x0071, .r140a = 0x17ff, .r1430_l = 0xff,
+		.r147x = { 0x10, 0x70, 0x70, 0x10 },
+		.r154x = { 0x1050, 0x0000, 0x07ff, 0x0360, 0x0271, 0x0090, 0x002e, 0x07ff, 0x02d0, 0x0240, 0x0032 },
+	},
 	[DMODE_1920x1080p_23_976] = &(struct display_mode){
 		.description = "1080p 23.97",
 		.width = 1920, .height = 1080,
