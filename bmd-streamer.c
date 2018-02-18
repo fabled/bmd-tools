@@ -1364,7 +1364,7 @@ int main(int argc, char **argv)
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
 	const char *msg = NULL;
-	int i, r, ec = 0, opt, optindex;
+	int i, r, ec = 0, opt, optindex, status;
 
 	signal(SIGCHLD, reapchildren);
 	signal(SIGTERM, dostop);
@@ -1453,6 +1453,9 @@ int main(int argc, char **argv)
 		libusb_handle_events(ctx);
 
 error:
+	// wait child process to terminate
+	while (waitpid(-1, &status, 0) != -1 || errno != ECHILD);
+
 	if (msg)
 		dlog(LOG_ERR, "failed to %s: %s", msg, libusb_error_name(r));
 	if (ctx)
