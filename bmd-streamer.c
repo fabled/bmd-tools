@@ -48,6 +48,7 @@ struct encoding_parameters {
 	int8_t		input_source;
 	char *		exec_program;
 	int		respawn : 1;
+	int		pipe_sz;
 	int		src_x, src_y, src_width, src_height, dst_width, dst_height;
 };
 
@@ -633,7 +634,7 @@ static int pipe2(int pipefd[2], int flags)
 }
 #endif
 
-static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_program)
+static int bmd_start_exec_program(struct blackmagic_device *bmd, int pipe_sz, char *exec_program)
 {
 	uint8_t ports[8];
 	char fmt[array_size(ports)*4];
@@ -652,6 +653,12 @@ static int bmd_start_exec_program(struct blackmagic_device *bmd, char *exec_prog
 
 	if (pipe2(pipefd, O_CLOEXEC) < 0)
 		return 0;
+
+	if (pipe_sz) {
+		if (fcntl(pipefd[0], F_SETPIPE_SZ, pipe_sz * 1024) < 0)
+			dlog(LOG_ERR, "%s: unable to set pipe size",
+			     bmd->name, ep.exec_program);
+	}
 
 	i = p = 0;
 	if (bmd->desc.idProduct != USB_PID_BMD_H264_PRO_RECORDER) {
@@ -714,7 +721,7 @@ static void *bmd_pump_mpegts(void *ctx)
 			if (ep.exec_program) {
 				if (ep.respawn) {
 					bmd_kill_exec_program(bmd);
-					bmd_start_exec_program(bmd, ep.exec_program);
+					bmd_start_exec_program(bmd, ep.pipe_sz, ep.exec_program);
 				} else {
 					bmd->running = 0;
 				}
@@ -1031,7 +1038,7 @@ static void bmd_encoder_start(struct blackmagic_device *bmd)
 		goto error;
 	}
 
-	if (!bmd_start_exec_program(bmd, ep.exec_program)) {
+	if (!bmd_start_exec_program(bmd, ep.pipe_sz, ep.exec_program)) {
 		err = "start exec program";
 		goto error;
 	}
@@ -1321,6 +1328,7 @@ static int usage(void)
 		"	-S,--input-source	Set input source (component, sdi, hdmi,\n"
 		"				composite, s-video, or 0-4)\n"
 		"	-f,--firmware-dir	Directory for firmware images\n"
+		"	-z,--pipe-size		Set stream output pipe size in kB\n"
 		"	-x,--exec		Program to execute for each connected stream\n"
 		"	-R,--respawn		Restart execute program if it exits\n"
 		"	-s,--syslog		Log to syslog\n"
@@ -1352,6 +1360,7 @@ int main(int argc, char **argv)
 		{ "fps-divider",	required_argument, NULL, 'F' },
 		{ "firmware-dir",	required_argument, NULL, 'f' },
 		{ "input-source",	required_argument, NULL, 'S' },
+		{ "pipe-size",		required_argument, NULL, 'z' },
 		{ "exec",		required_argument, NULL, 'x' },
 		{ "respawn",		no_argument, NULL, 'R' },
 		{ "syslog",		no_argument, NULL, 's' },
@@ -1363,7 +1372,7 @@ int main(int argc, char **argv)
 		{ "dst-height",		required_argument, NULL, '5' },
 		{ NULL }
 	};
-	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:x:Rs";
+	static const char short_options[] = "vk:K:a:P:L:bcBCF:f:S:z:x:Rs";
 
 	libusb_context *ctx;
 	libusb_hotplug_callback_handle cbhandle;
@@ -1409,6 +1418,7 @@ int main(int argc, char **argv)
 			if (i >= array_size(input_source_names)) i = -1;
 			ep.input_source = i;
 			break;
+		case 'z': ep.pipe_sz = atoi(optarg); break;
 		case '0': ep.src_x = atoi(optarg); break;
 		case '1': ep.src_y = atoi(optarg); break;
 		case '2': ep.src_width = atoi(optarg); break;
