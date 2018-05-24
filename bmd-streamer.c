@@ -31,7 +31,7 @@
 
 #include "blackmagic.h"
 
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 
 /*
  * TODO and ideas:
